@@ -1,33 +1,50 @@
 # Idea Reality Check (idea-reality-mcp)
 
-> MCP tool that scans GitHub, Hacker News, npm, PyPI, and Product Hunt before you build. Returns a 0-100 reality signal with evidence of existing competitors.
+> MCP tool that scans GitHub, Hacker News, npm, PyPI, and Product Hunt before you build. Returns a 0-100 reality signal with evidence.
 
-idea-reality-mcp is a Model Context Protocol (MCP) server that helps AI coding agents validate ideas before building. It searches 5 real databases and returns structured data: a 0-100 reality signal, a list of similar projects with stars/downloads, and pivot suggestions.
+## What It Does
 
-Key features:
-- Quick mode: GitHub + Hacker News (2 sources, fast)
-- Deep mode: All 5 sources in parallel (GitHub, HN, npm, PyPI, Product Hunt)
-- Keyword extraction: Dictionary-based (150+ terms, Chinese supported) or LLM-powered (Claude Haiku)
-- Scoring: Weighted formula, explainable, not ML-based
-- Graceful degradation: Partial results if any source fails
+Idea Reality Check is a pre-build validation tool designed for AI coding agents. Instead of relying on LLM knowledge (which may be outdated), it searches 5 real databases and returns structured evidence about existing competition and market activity.
 
-## Documentation
+## Install
 
-- [README](https://github.com/mnemox-ai/idea-reality-mcp#readme): Full documentation with install instructions and examples.
-- [PyPI](https://pypi.org/project/idea-reality-mcp/): Install via `pip install idea-reality-mcp`.
-- [Web Demo](https://mnemox.ai/check): Try it in your browser, no installation needed.
-- [REST API](https://idea-reality-mcp.onrender.com): POST /api/check with {idea_text, depth} for programmatic access.
-- [GitHub Action](https://github.com/mnemox-ai/idea-check-action): CI/CD integration, runs on every PR.
+### Claude Desktop
+Add to claude_desktop_config.json:
+{
+  "mcpServers": {
+    "idea-reality": {
+      "command": "uvx",
+      "args": ["idea-reality-mcp"]
+    }
+  }
+}
 
-## API Reference
+### Claude Code
+claude mcp add idea-reality -- uvx idea-reality-mcp
 
-- POST /api/check — Body: {"idea_text": "your idea", "depth": "quick|deep"} → Returns {reality_signal, top_similars, evidence, pivot_hints, idea_hash}
-- POST /api/extract-keywords — Body: {"text": "your idea"} → Returns extracted keywords via LLM
-- GET /api/history/{idea_hash} — Returns score history for a given idea
-- GET /health — Liveness probe
+### pip
+pip install idea-reality-mcp
 
-## Optional
+## Key Features
 
-- [CHANGELOG](https://github.com/mnemox-ai/idea-reality-mcp/blob/main/CHANGELOG.md): Version history.
-- [Agent Templates](https://github.com/mnemox-ai/idea-reality-mcp/tree/main/templates): One-line hints for Claude Code, Cursor, Windsurf, GitHub Copilot.
-- [Sample Prompts](https://github.com/mnemox-ai/idea-reality-mcp/blob/main/examples/sample_prompts.md): Example ideas to test with.
+- **Quick mode**: GitHub + HN (2 sources, fast)
+- **Deep mode**: All 5 sources in parallel (GitHub, HN, npm, PyPI, Product Hunt)
+- **0-100 reality signal**: Higher = more competition
+- **Evidence-based**: Returns actual repos, posts, packages found
+- **Pivot hints**: LLM-powered suggestions based on real competitor data
+- **Chinese support**: 150+ term mappings for keyword extraction
+
+## Architecture
+
+- Entry: `python -m idea_reality_mcp` (MCP stdio)
+- API: `https://idea-reality-mcp.onrender.com` (REST + MCP Streamable HTTP)
+- Scoring: Weighted formula across sources, intentionally simple and explainable
+- Sources: Each in `src/idea_reality_mcp/sources/` as independent adapter
+
+## Links
+
+- [GitHub](https://github.com/mnemox-ai/idea-reality-mcp)
+- [PyPI](https://pypi.org/project/idea-reality-mcp/)
+- [Live Demo](https://mnemox.ai/check)
+- [MCP Registry](https://registry.modelcontextprotocol.io): io.github.mnemox-ai/idea-reality-mcp
+- [Parent: Mnemox](https://mnemox.ai)
