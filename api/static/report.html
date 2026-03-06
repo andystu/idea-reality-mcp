@@ -1,0 +1,721 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mnemox Idea Reality — Pre-build Reality Check</title>
+<style>
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+  body{
+    font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+    background:#0a0a0a;color:#e0e0e0;line-height:1.6;
+    min-height:100vh;display:flex;flex-direction:column;
+  }
+
+  /* --- Header --- */
+  .header{
+    text-align:center;padding:48px 24px 32px;
+    border-bottom:1px solid #1a1a1a;
+  }
+  .header h1{font-size:28px;font-weight:700;color:#fff;margin-bottom:8px}
+  .header h1 span{color:#00cc66}
+  .header .social-proof{
+    display:flex;gap:24px;justify-content:center;
+    margin-top:16px;font-size:14px;color:#888;
+  }
+  .social-proof .badge{
+    display:flex;align-items:center;gap:6px;
+    background:#141414;border:1px solid #222;border-radius:20px;
+    padding:6px 14px;
+  }
+  .social-proof .badge strong{color:#ccc}
+
+  /* --- Search --- */
+  .search-section{
+    max-width:640px;margin:40px auto;padding:0 24px;width:100%;
+  }
+  .search-section textarea{
+    width:100%;height:100px;background:#111;border:1px solid #333;
+    border-radius:8px;padding:14px;color:#e0e0e0;font-size:15px;
+    resize:vertical;font-family:inherit;
+  }
+  .search-section textarea::placeholder{color:#555}
+  .search-section textarea:focus{outline:none;border-color:#00cc66}
+  .search-controls{
+    display:flex;gap:12px;margin-top:12px;align-items:center;
+  }
+  .depth-select{
+    background:#111;border:1px solid #333;color:#e0e0e0;
+    padding:10px 14px;border-radius:8px;font-size:14px;cursor:pointer;
+  }
+  .depth-select:focus{outline:none;border-color:#00cc66}
+  .btn-check{
+    flex:1;background:#00cc66;color:#0a0a0a;border:none;
+    padding:12px 24px;border-radius:8px;font-size:15px;font-weight:600;
+    cursor:pointer;transition:background .2s;
+  }
+  .btn-check:hover{background:#00e070}
+  .btn-check:disabled{background:#333;color:#666;cursor:not-allowed}
+
+  /* --- Loading --- */
+  .loading{
+    text-align:center;padding:40px;display:none;
+  }
+  .spinner{
+    width:36px;height:36px;border:3px solid #222;border-top-color:#00cc66;
+    border-radius:50%;animation:spin .8s linear infinite;margin:0 auto 12px;
+  }
+  @keyframes spin{to{transform:rotate(360deg)}}
+
+  /* --- Free Result --- */
+  #free-result{
+    max-width:640px;margin:0 auto;padding:0 24px;width:100%;display:none;
+  }
+  .signal-display{
+    display:flex;align-items:center;gap:32px;
+    background:#111;border:1px solid #1a1a1a;border-radius:12px;
+    padding:32px;margin-bottom:24px;
+  }
+  .signal-circle{
+    width:120px;height:120px;border-radius:50%;
+    display:flex;align-items:center;justify-content:center;flex-shrink:0;
+    position:relative;
+  }
+  .signal-circle .number{font-size:36px;font-weight:700;color:#fff}
+  .signal-circle .label{
+    position:absolute;bottom:-4px;font-size:11px;color:#888;
+    text-transform:uppercase;letter-spacing:1px;
+  }
+  .signal-circle.green{border:4px solid #00cc66;box-shadow:0 0 24px rgba(0,204,102,.15)}
+  .signal-circle.yellow{border:4px solid #ffaa00;box-shadow:0 0 24px rgba(255,170,0,.15)}
+  .signal-circle.red{border:4px solid #ff4444;box-shadow:0 0 24px rgba(255,68,68,.15)}
+  .signal-meta{flex:1}
+  .signal-meta .dup{font-size:14px;color:#aaa;margin-bottom:8px}
+  .signal-meta .dup strong{color:#fff}
+  .signal-meta .competitor{
+    font-size:13px;color:#888;padding:8px 12px;
+    background:#0d0d0d;border-radius:6px;margin-top:8px;
+  }
+  .signal-meta .competitor strong{color:#ccc}
+
+  .pivot-hints{
+    background:#111;border:1px solid #1a1a1a;border-radius:12px;
+    padding:24px;margin-bottom:40px;
+  }
+  .pivot-hints h3{font-size:15px;color:#fff;margin-bottom:14px}
+  .pivot-hints ol{padding-left:20px}
+  .pivot-hints li{
+    font-size:14px;color:#bbb;margin-bottom:10px;line-height:1.5;
+  }
+
+  /* --- Report Preview (blurred) --- */
+  #report-preview{
+    max-width:800px;margin:0 auto;padding:0 24px 40px;width:100%;display:none;
+  }
+  #report-preview h2{
+    font-size:20px;color:#fff;margin-bottom:24px;text-align:center;
+  }
+  .preview-grid{
+    display:grid;grid-template-columns:1fr 1fr;gap:20px;
+  }
+  @media(max-width:640px){.preview-grid{grid-template-columns:1fr}}
+
+  .section-card{
+    background:#111;border:1px solid #1a1a1a;border-radius:12px;
+    overflow:hidden;position:relative;
+  }
+  .section-card .card-title{
+    font-size:14px;font-weight:600;color:#fff;
+    padding:16px 20px 0;
+  }
+  .card-content{padding:12px 20px 20px;position:relative;min-height:160px}
+  .card-visible{font-size:13px;color:#bbb;line-height:1.6}
+  .card-blurred{
+    font-size:13px;color:#bbb;line-height:1.6;margin-top:8px;
+    filter:blur(5px);-webkit-filter:blur(5px);
+    user-select:none;-webkit-user-select:none;
+    pointer-events:none;
+  }
+  .card-overlay{
+    position:absolute;bottom:0;left:0;right:0;height:80px;
+    background:linear-gradient(transparent,#111);
+    pointer-events:none;
+  }
+
+  /* --- Paywall CTA --- */
+  #paywall-cta{
+    text-align:center;padding:48px 24px 64px;display:none;
+  }
+  .btn-unlock{
+    background:#00cc66;color:#0a0a0a;border:none;
+    padding:16px 48px;border-radius:8px;font-size:18px;font-weight:700;
+    cursor:pointer;transition:background .2s,transform .1s;
+  }
+  .btn-unlock:hover{background:#00e070;transform:translateY(-1px)}
+  .btn-unlock:active{transform:translateY(0)}
+  .paywall-sub{
+    margin-top:14px;font-size:14px;color:#888;
+  }
+  .trust-badges{
+    display:flex;gap:24px;justify-content:center;margin-top:28px;
+    flex-wrap:wrap;
+  }
+  .trust-badge{
+    font-size:12px;color:#666;display:flex;align-items:center;gap:6px;
+  }
+  .trust-badge svg{width:16px;height:16px;fill:#444}
+
+  /* --- Error --- */
+  .error-msg{
+    max-width:640px;margin:20px auto;padding:12px 20px;
+    background:#2a1515;border:1px solid #442222;border-radius:8px;
+    color:#ff6666;font-size:14px;display:none;
+  }
+
+  /* --- Footer --- */
+  .footer{
+    margin-top:auto;text-align:center;padding:32px 24px;
+    border-top:1px solid #1a1a1a;font-size:12px;color:#555;
+  }
+  .footer a{color:#888;text-decoration:none}
+  .footer a:hover{color:#ccc}
+
+  /* --- Full Report (after payment) --- */
+  #full-report{
+    max-width:800px;margin:0 auto;padding:0 24px 40px;width:100%;display:none;
+  }
+  .report-toolbar{
+    display:flex;gap:12px;justify-content:flex-end;align-items:center;
+    margin-bottom:24px;padding:16px 0;border-bottom:1px solid #1a1a1a;
+  }
+  .btn-pdf{
+    background:#1a1a1a;color:#00cc66;border:1px solid #333;
+    padding:8px 20px;border-radius:6px;font-size:14px;text-decoration:none;
+    transition:background .2s;
+  }
+  .btn-pdf:hover{background:#222}
+  .lang-select{
+    background:#111;border:1px solid #333;color:#e0e0e0;
+    padding:8px 14px;border-radius:6px;font-size:14px;cursor:pointer;
+  }
+  .lang-select:focus{outline:none;border-color:#00cc66}
+  .report-section{
+    background:#111;border:1px solid #1a1a1a;border-radius:12px;
+    padding:24px;margin-bottom:20px;
+  }
+  .report-section h3{font-size:16px;color:#00cc66;margin-bottom:12px}
+  .report-section p{font-size:14px;color:#bbb;line-height:1.7}
+  .competitor-item{
+    padding:12px;background:#0d0d0d;border-radius:8px;margin-bottom:8px;
+  }
+  .competitor-item strong{color:#fff}
+  .competitor-item .desc{color:#888;font-size:13px;margin-top:4px}
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<header class="header">
+  <h1>Mnemox <span>Idea Reality</span></h1>
+  <p style="color:#888;font-size:15px">Pre-build reality check for your next project</p>
+  <div class="social-proof">
+    <div class="badge"><strong id="ideas-count">—</strong> ideas checked</div>
+    <div class="badge">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="#ccc"><path d="M8 .25a.75.75 0 0 1 .673.418l1.882 3.815 4.21.612a.75.75 0 0 1 .416 1.279l-3.046 2.97.719 4.192a.75.75 0 0 1-1.088.791L8 12.347l-3.766 1.98a.75.75 0 0 1-1.088-.79l.72-4.194L.818 6.374a.75.75 0 0 1 .416-1.28l4.21-.611L7.327.668A.75.75 0 0 1 8 .25z"/></svg>
+      <strong id="stars-count">—</strong> GitHub stars
+    </div>
+    <div class="badge"><strong id="countries-count">—</strong> countries</div>
+    <div class="badge" id="last-check-badge" style="display:none">Last check: <strong id="last-check-ago">—</strong></div>
+  </div>
+</header>
+
+<!-- Search -->
+<section class="search-section">
+  <textarea id="idea-input" placeholder="Describe your idea... e.g. 'A CLI tool that converts Figma designs to React components'" maxlength="500"></textarea>
+  <div class="search-controls">
+    <select class="depth-select" id="depth-select">
+      <option value="quick">Quick (GitHub + HN)</option>
+      <option value="deep">Deep (5 sources)</option>
+    </select>
+    <button class="btn-check" id="btn-check">Check Reality</button>
+  </div>
+</section>
+
+<!-- Error -->
+<div class="error-msg" id="error-msg"></div>
+
+<!-- Loading -->
+<div class="loading" id="loading">
+  <div class="spinner"></div>
+  <p style="color:#888;font-size:14px">Scanning the market...</p>
+</div>
+
+<!-- Free Result -->
+<section id="free-result">
+  <div class="signal-display">
+    <div class="signal-circle" id="signal-circle">
+      <span class="number" id="signal-number">—</span>
+      <span class="label">/100</span>
+    </div>
+    <div class="signal-meta">
+      <div class="dup">Duplicate likelihood: <strong id="dup-value">—</strong></div>
+      <div class="competitor" id="top-competitor"></div>
+    </div>
+  </div>
+  <div class="pivot-hints" id="pivot-hints">
+    <h3>Pivot Suggestions</h3>
+    <ol id="pivot-list"></ol>
+  </div>
+</section>
+
+<!-- Report Preview (blurred) -->
+<section id="report-preview">
+  <h2>Full Competitive Analysis Report</h2>
+  <div class="preview-grid" id="preview-grid"></div>
+</section>
+
+<!-- Paywall CTA -->
+<section id="paywall-cta">
+  <button class="btn-unlock" id="btn-unlock">Unlock Full Report &mdash; $9.99</button>
+  <p class="paywall-sub">One-time payment. Instant access. No subscription.</p>
+  <div class="trust-badges">
+    <div class="trust-badge">
+      <svg viewBox="0 0 24 24"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm-2 16l-4-4 1.41-1.41L10 14.17l6.59-6.59L18 9l-8 8z"/></svg>
+      Secure checkout via Stripe
+    </div>
+    <div class="trust-badge">
+      <svg viewBox="0 0 24 24"><path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zm6.93 6h-2.95a15.65 15.65 0 0 0-1.38-3.56A8.03 8.03 0 0 1 18.92 8zM12 4.04c.83 1.2 1.48 2.53 1.91 3.96h-3.82c.43-1.43 1.08-2.76 1.91-3.96zM4.26 14C4.1 13.36 4 12.69 4 12s.1-1.36.26-2h3.38c-.08.66-.14 1.32-.14 2s.06 1.34.14 2H4.26zm.82 2h2.95c.32 1.25.78 2.45 1.38 3.56A7.987 7.987 0 0 1 5.08 16zm2.95-8H5.08a7.987 7.987 0 0 1 4.33-3.56A15.65 15.65 0 0 0 8.03 8zM12 19.96c-.83-1.2-1.48-2.53-1.91-3.96h3.82c-.43 1.43-1.08 2.76-1.91 3.96zM14.34 14H9.66c-.09-.66-.16-1.32-.16-2s.07-1.35.16-2h4.68c.09.65.16 1.32.16 2s-.07 1.34-.16 2zm.25 5.56c.6-1.11 1.06-2.31 1.38-3.56h2.95a8.03 8.03 0 0 1-4.33 3.56zM16.36 14c.08-.66.14-1.32.14-2s-.06-1.34-.14-2h3.38c.16.64.26 1.31.26 2s-.1 1.36-.26 2h-3.38z"/></svg>
+      Data from 5 real sources
+    </div>
+    <div class="trust-badge">
+      <svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
+      Instant delivery
+    </div>
+  </div>
+</section>
+
+<!-- Full Report (shown after payment) -->
+<section id="full-report">
+  <div class="report-toolbar">
+    <select id="lang-select" class="lang-select">
+      <option value="en">English</option>
+      <option value="zh-TW">繁體中文</option>
+      <option value="zh-CN">简体中文</option>
+    </select>
+    <a id="btn-pdf" class="btn-pdf" href="#">Download PDF</a>
+  </div>
+  <div id="report-content"></div>
+</section>
+
+<!-- Footer -->
+<footer class="footer">
+  <p>&copy; 2026 <a href="https://mnemox.ai" target="_blank">Mnemox AI</a> &middot;
+    <a href="https://github.com/mnemox-ai/idea-reality-mcp" target="_blank">GitHub</a> &middot;
+    <a href="https://pypi.org/project/idea-reality-mcp/" target="_blank">PyPI</a>
+  </p>
+</footer>
+
+<script>
+(function(){
+  const API = '';  // same origin
+  const $ = s => document.querySelector(s);
+  const show = el => { el.style.display = ''; };
+  const hide = el => { el.style.display = 'none'; };
+
+  // State
+  let currentIdeaHash = '';
+  let currentIdeaText = '';
+
+  // --- Social proof ---
+  async function loadSocialProof() {
+    try {
+      // Record page view (fire-and-forget)
+      fetch(API + '/api/view', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ page: 'report' }),
+      }).catch(() => {});
+
+      const res = await fetch(API + '/api/social-proof');
+      if (res.ok) {
+        const data = await res.json();
+        $('#ideas-count').textContent = (data.total_checks || 0).toLocaleString();
+        $('#stars-count').textContent = (data.github_stars || 0).toLocaleString();
+        $('#countries-count').textContent = data.countries || '—';
+        if (data.last_check_ago) {
+          $('#last-check-ago').textContent = data.last_check_ago;
+          $('#last-check-badge').style.display = '';
+        }
+      }
+    } catch (e) { /* silent */ }
+  }
+  loadSocialProof();
+
+  // --- Signal color ---
+  function signalClass(score) {
+    if (score < 40) return 'green';
+    if (score < 80) return 'yellow';
+    return 'red';
+  }
+
+  // --- Build preview cards ---
+  const REPORT_SECTIONS = [
+    { key: 'score_explanation', title: 'Score Breakdown', icon: '' },
+    { key: 'market_evidence', title: 'Market Evidence', icon: '' },
+    { key: 'competitor_analysis', title: 'Competitor Analysis', icon: '' },
+    { key: 'strategic_pivots', title: 'Strategic Pivots', icon: '' },
+    { key: 'gtm_strategy', title: 'Go-to-Market Strategy', icon: '' },
+    { key: 'risk_assessment', title: 'Risk Assessment', icon: '' },
+  ];
+
+  function buildPreviewCards(preview, checkResult) {
+    const grid = $('#preview-grid');
+    grid.innerHTML = '';
+
+    const score = checkResult.reality_signal || 0;
+    const dup = checkResult.duplicate_likelihood || 'unknown';
+    const evidence = preview.evidence || [];
+    const similars = preview.top_similars || [];
+    const pivots = preview.pivot_hints || [];
+
+    const cardData = [
+      {
+        title: 'Score Breakdown',
+        visible: `Reality signal: ${score}/100. Duplicate likelihood: ${dup}.`,
+        blurred: `The primary signal contributor is GitHub repository data with ${evidence.length} evidence points. Source weight distribution shows repository count at 60%, star magnitude at 20%, and community discussion at 20% for quick mode analysis. The scoring algorithm applies logarithmic scaling to prevent outlier dominance.`,
+      },
+      {
+        title: 'Market Evidence',
+        visible: evidence.slice(0, 2).map(e => `[${e.source}] ${e.detail}`).join('\n') || 'No evidence available.',
+        blurred: evidence.length > 2
+          ? evidence.slice(2).map(e => `[${e.source}] ${e.detail}`).join('\n') + '\nAdditional signals from npm registry, PyPI package index, and Product Hunt launch database provide corroborating data points for market saturation analysis.'
+          : 'Extended analysis includes cross-referencing npm downloads, PyPI installs, and Product Hunt upvote velocity to gauge market traction and developer interest over time.',
+      },
+      {
+        title: 'Competitor Analysis',
+        visible: similars.length > 0
+          ? `Top competitor: ${similars[0].name}\n${similars[0].description}`
+          : 'No direct competitors identified.',
+        blurred: 'Extended competitor list includes 10 repositories ranked by relevance score. Each entry features star count trajectory, last commit date, contributor count, and issue resolution rate. Fork analysis reveals derivative projects and community fragmentation patterns.',
+      },
+      {
+        title: 'Strategic Pivots',
+        visible: pivots.length > 0 ? pivots[0] : 'Pivot analysis requires market data.',
+        blurred: pivots.length > 1
+          ? pivots.slice(1).join('\n') + '\nAdditional pivot vectors include geographic market targeting, developer segment specialization, and integration-first distribution strategy through existing tool ecosystems.'
+          : 'Detailed pivot analysis covers underserved market segments, feature gap mapping against competitors, pricing strategy differentiation, and community-first distribution channels for maximum early traction.',
+      },
+      {
+        title: 'Go-to-Market Strategy',
+        visible: 'Recommended launch channels and initial traction strategy based on competitive positioning.',
+        blurred: 'Phase 1: Developer community seeding through targeted technical content on Hacker News and relevant subreddits. Phase 2: Product Hunt launch with early-access waitlist conversion. Phase 3: Integration partnerships with complementary tools. Pricing analysis suggests freemium with usage-based upgrade triggers.',
+      },
+      {
+        title: 'Risk Assessment',
+        visible: `Market risk level and technical feasibility assessment for this ${score >= 80 ? 'highly competitive' : score >= 40 ? 'moderately competitive' : 'low competition'} space.`,
+        blurred: 'Market risk: Incumbent players may replicate features within 3-6 months. Technical risk: Core differentiator requires sustained R&D investment. Competitive risk: Open-source alternatives reduce willingness to pay. Mitigation strategies include speed-to-market advantage, community lock-in through ecosystem integrations, and proprietary data moats.',
+      },
+    ];
+
+    cardData.forEach(card => {
+      const el = document.createElement('div');
+      el.className = 'section-card';
+      el.innerHTML = `
+        <div class="card-title">${card.title}</div>
+        <div class="card-content">
+          <div class="card-visible">${escapeHtml(card.visible)}</div>
+          <div class="card-blurred">${escapeHtml(card.blurred)}</div>
+          <div class="card-overlay"></div>
+        </div>
+      `;
+      grid.appendChild(el);
+    });
+  }
+
+  function escapeHtml(text) {
+    return text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
+  }
+
+  // --- Check ---
+  const btnCheck = $('#btn-check');
+  const ideaInput = $('#idea-input');
+
+  btnCheck.addEventListener('click', async () => {
+    const text = ideaInput.value.trim();
+    if (!text) return;
+
+    const depth = $('#depth-select').value;
+    currentIdeaText = text;
+
+    // Reset UI
+    hide($('#free-result'));
+    hide($('#report-preview'));
+    hide($('#paywall-cta'));
+    hide($('#error-msg'));
+    show($('#loading'));
+    btnCheck.disabled = true;
+
+    try {
+      // Fire both requests in parallel
+      const [checkRes, previewRes] = await Promise.all([
+        fetch(API + '/api/check', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ idea_text: text, depth }),
+        }),
+        fetch(API + '/api/report/preview', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ idea_text: text, depth }),
+        }),
+      ]);
+
+      if (!checkRes.ok) {
+        const err = await checkRes.json().catch(() => ({}));
+        throw new Error(err.detail || `Check failed (${checkRes.status})`);
+      }
+
+      const checkData = await checkRes.json();
+      const previewData = previewRes.ok ? await previewRes.json() : {};
+
+      currentIdeaHash = checkData.idea_hash || '';
+
+      // Render free result
+      renderFreeResult(checkData);
+
+      // Render blurred preview
+      buildPreviewCards(previewData, checkData);
+
+      hide($('#loading'));
+      show($('#free-result'));
+      show($('#report-preview'));
+      show($('#paywall-cta'));
+
+      // Smooth scroll to result
+      $('#free-result').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } catch (err) {
+      hide($('#loading'));
+      const errEl = $('#error-msg');
+      errEl.textContent = err.message || 'Something went wrong. Please try again.';
+      show(errEl);
+    } finally {
+      btnCheck.disabled = false;
+    }
+  });
+
+  // Enter key submits
+  ideaInput.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      btnCheck.click();
+    }
+  });
+
+  function renderFreeResult(data) {
+    const score = data.reality_signal || 0;
+    const cls = signalClass(score);
+
+    const circle = $('#signal-circle');
+    circle.className = 'signal-circle ' + cls;
+    $('#signal-number').textContent = score;
+
+    $('#dup-value').textContent = data.duplicate_likelihood || 'Unknown';
+
+    // Top competitor
+    const compEl = $('#top-competitor');
+    if (data.top_similars && data.top_similars.length > 0) {
+      const top = data.top_similars[0];
+      const stars = top.stars ? ` (${top.stars.toLocaleString()} stars)` : '';
+      compEl.innerHTML = `<strong>Top competitor:</strong> ${escapeHtml(top.name)}${stars}`;
+    } else {
+      compEl.innerHTML = '<strong>No direct competitors found</strong>';
+    }
+
+    // Pivot hints
+    const list = $('#pivot-list');
+    list.innerHTML = '';
+    const hints = data.pivot_hints || [];
+    if (hints.length === 0) {
+      list.innerHTML = '<li>No pivot suggestions available.</li>';
+    } else {
+      hints.forEach(hint => {
+        const li = document.createElement('li');
+        li.textContent = hint;
+        list.appendChild(li);
+      });
+    }
+  }
+
+  // --- Unlock (Stripe) ---
+  $('#btn-unlock').addEventListener('click', async () => {
+    if (!currentIdeaHash || !currentIdeaText) return;
+
+    const btn = $('#btn-unlock');
+    btn.disabled = true;
+    btn.textContent = 'Redirecting to checkout...';
+
+    try {
+      const res = await fetch(API + '/api/create-checkout', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          idea_text: currentIdeaText,
+          idea_hash: currentIdeaHash,
+          language: 'en',
+          success_url: window.location.origin + '/static/report.html?session_id={CHECKOUT_SESSION_ID}',
+          cancel_url: window.location.href,
+        }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || 'Checkout creation failed');
+      }
+
+      const data = await res.json();
+      if (data.checkout_url) {
+        window.location.href = data.checkout_url;
+      } else {
+        throw new Error('No checkout URL returned');
+      }
+    } catch (err) {
+      btn.disabled = false;
+      btn.innerHTML = 'Unlock Full Report &mdash; $9.99';
+      const errEl = $('#error-msg');
+      errEl.textContent = err.message;
+      show(errEl);
+    }
+  });
+
+  // --- Payment success handling ---
+  let currentReportId = '';
+
+  async function handlePaymentSuccess(sid, retries) {
+    retries = retries || 0;
+    hide($('.search-section'));
+    hide($('#free-result'));
+    hide($('#report-preview'));
+    hide($('#paywall-cta'));
+    hide($('#error-msg'));
+    show($('#loading'));
+
+    try {
+      const res = await fetch(API + '/api/checkout-status?session_id=' + encodeURIComponent(sid));
+      if (!res.ok) throw new Error('Failed to check payment status');
+      const data = await res.json();
+
+      if (data.payment_status === 'paid' && data.report_id) {
+        const reportRes = await fetch(API + '/report/' + data.report_id);
+        if (!reportRes.ok) throw new Error('Failed to load report');
+        const report = await reportRes.json();
+        currentReportId = data.report_id;
+        renderFullReport(report);
+        hide($('#loading'));
+        show($('#full-report'));
+      } else if (data.payment_status === 'paid' && retries < 10) {
+        setTimeout(function() { handlePaymentSuccess(sid, retries + 1); }, 2000);
+      } else if (data.payment_status !== 'paid') {
+        throw new Error('Payment was not completed. Please try again.');
+      } else {
+        throw new Error('Report is being generated. Please refresh the page in a minute.');
+      }
+    } catch (err) {
+      hide($('#loading'));
+      const errEl = $('#error-msg');
+      errEl.textContent = err.message;
+      show(errEl);
+      show($('.search-section'));
+    }
+  }
+
+  function renderFullReport(data) {
+    const rd = data.report_data || {};
+    const report = rd.report || {};
+    const scoreExp = report.score_explanation || {};
+    const market = report.market_pulse || {};
+    const competitors = report.extended_competitors || [];
+    const llm = report.llm_analysis || {};
+
+    const score = data.score || rd.reality_signal || 0;
+    const cls = signalClass(score);
+
+    $('#btn-pdf').href = API + '/report/' + data.report_id + '/pdf';
+
+    let compHtml = '';
+    competitors.forEach(function(c) {
+      const stars = c.stars ? ' (' + c.stars.toLocaleString() + ' stars)' : '';
+      compHtml += '<div class="competitor-item">'
+        + '<strong>' + escapeHtml(c.name || '') + stars + '</strong>'
+        + (c.url ? '<br><a href="' + escapeHtml(c.url) + '" target="_blank" style="color:#00cc66;font-size:12px">' + escapeHtml(c.url) + '</a>' : '')
+        + '<div class="desc">' + escapeHtml(c.description || '') + '</div>'
+        + '</div>';
+    });
+
+    const trendMap = {increasing:'Increasing',decreasing:'Decreasing',stable:'Stable'};
+    const trendLabel = trendMap[market.trend] || market.trend || 'N/A';
+
+    $('#report-content').innerHTML = ''
+      + '<div class="signal-display">'
+      + '<div class="signal-circle ' + cls + '">'
+      + '<span class="number">' + score + '</span>'
+      + '<span class="label">/100</span>'
+      + '</div>'
+      + '<div class="signal-meta">'
+      + '<div class="dup"><strong>' + escapeHtml(data.idea_text || '') + '</strong></div>'
+      + '</div>'
+      + '</div>'
+      + '<div class="report-section"><h3>Score Breakdown</h3>'
+      + '<p>' + escapeHtml(scoreExp.summary || '') + '</p></div>'
+      + '<div class="report-section"><h3>Market Pulse</h3>'
+      + '<p>Similar ideas: ' + (market.similar_count || 0)
+      + ' | Average score: ' + (market.avg_score || 0) + '/100'
+      + ' | Trend: ' + trendLabel + '</p></div>'
+      + '<div class="report-section"><h3>Competitor Analysis (' + competitors.length + ' found)</h3>'
+      + (compHtml || '<p>No competitors found.</p>') + '</div>'
+      + '<div class="report-section" id="llm-differentiation"><h3>Differentiation Strategy</h3>'
+      + '<p>' + escapeHtml(llm.differentiation_strategy || '') + '</p></div>'
+      + '<div class="report-section" id="llm-gtm"><h3>Go-to-Market Recommendation</h3>'
+      + '<p>' + escapeHtml(llm.gtm_recommendation || '') + '</p></div>'
+      + '<div class="report-section" id="llm-risk"><h3>Risk Assessment</h3>'
+      + '<p>' + escapeHtml(llm.risk_assessment || '') + '</p></div>';
+  }
+
+  // --- Language selector ---
+  const langSelect = document.getElementById('lang-select');
+  if (langSelect) {
+    langSelect.addEventListener('change', async function() {
+      if (!currentReportId) return;
+      const lang = langSelect.value;
+      langSelect.disabled = true;
+      try {
+        const res = await fetch(API + '/report/' + currentReportId + '/translate?lang=' + encodeURIComponent(lang), { method: 'POST' });
+        if (!res.ok) throw new Error('Translation failed');
+        const data = await res.json();
+        const llm = (data.report_data && data.report_data.report && data.report_data.report.llm_analysis) || {};
+        const diffEl = document.querySelector('#llm-differentiation p');
+        const gtmEl = document.querySelector('#llm-gtm p');
+        const riskEl = document.querySelector('#llm-risk p');
+        if (diffEl) diffEl.innerHTML = escapeHtml(llm.differentiation_strategy || '');
+        if (gtmEl) gtmEl.innerHTML = escapeHtml(llm.gtm_recommendation || '');
+        if (riskEl) riskEl.innerHTML = escapeHtml(llm.risk_assessment || '');
+      } catch (err) {
+        const errEl = $('#error-msg');
+        errEl.textContent = err.message;
+        show(errEl);
+      } finally {
+        langSelect.disabled = false;
+      }
+    });
+  }
+
+  // --- Check URL for payment success on page load ---
+  (function() {
+    const params = new URLSearchParams(window.location.search);
+    const sid = params.get('session_id');
+    if (sid) handlePaymentSuccess(sid);
+  })();
+
+})();
+</script>
+</body>
+</html>

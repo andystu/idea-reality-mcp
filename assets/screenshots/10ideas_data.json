@@ -1,0 +1,92 @@
+[
+  {
+    "idea": "AI code review",
+    "signal": 90,
+    "badge": "HIGH",
+    "top_name": "Sfedfcv/redesigned-pancake",
+    "top_stars": 39043,
+    "github_repos": 2299,
+    "hn_posts": 328
+  },
+  {
+    "idea": "Feature flags",
+    "signal": 90,
+    "badge": "HIGH",
+    "top_name": "microsoft/FeatureManagement-Dotnet",
+    "top_stars": 1168,
+    "github_repos": 591,
+    "hn_posts": 37
+  },
+  {
+    "idea": "AI chatbot",
+    "signal": 90,
+    "badge": "HIGH",
+    "top_name": "QuivrHQ/quivr",
+    "top_stars": 38966,
+    "github_repos": 45762,
+    "hn_posts": 1171
+  },
+  {
+    "idea": "Markdown notes",
+    "signal": 90,
+    "badge": "HIGH",
+    "top_name": "usememos/memos",
+    "top_stars": 63345,
+    "github_repos": 29289,
+    "hn_posts": 478
+  },
+  {
+    "idea": "LLM gateway",
+    "signal": 90,
+    "badge": "HIGH",
+    "top_name": "QuantumNous/new-api",
+    "top_stars": 37318,
+    "github_repos": 1068,
+    "hn_posts": 140
+  },
+  {
+    "idea": "Agent memory",
+    "signal": 90,
+    "badge": "HIGH",
+    "top_name": "MemMachine/MemMachine",
+    "top_stars": 55116,
+    "github_repos": 1585,
+    "hn_posts": 355
+  },
+  {
+    "idea": "MCP + DB query",
+    "signal": 90,
+    "badge": "HIGH",
+    "top_name": "benborla/mcp-server-mysql",
+    "top_stars": 1246,
+    "github_repos": 1326,
+    "hn_posts": 260
+  },
+  {
+    "idea": "Changelog generator",
+    "signal": 90,
+    "badge": "HIGH",
+    "top_name": "orhun/git-cliff",
+    "top_stars": 11441,
+    "github_repos": 742,
+    "hn_posts": 101
+  },
+  {
+    "idea": "MCP + CI/CD",
+    "signal": 18,
+    "badge": "LOW",
+    "top_name": "N/A",
+    "top_stars": 0,
+    "github_repos": 0,
+    "hn_posts": 350
+  },
+  {
+    "idea": "Pet collar ESP32",
+    "signal": 10,
+    "badge": "LOW",
+    "top_name": "N/A",
+    "top_stars": 0,
+    "github_repos": 0,
+    "hn_posts": 11
+  }
+]

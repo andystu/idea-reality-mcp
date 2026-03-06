@@ -1,198 +1,66 @@
 # IDEA-REALITY-MCP — Project Context
 
 ## What This Is
-Mnemox Idea Reality MCP Server v0.4.0 — a workflow-native pre-build reality check for AI coding agents.
-MCP tool `idea_check` scans GitHub, HN, npm, PyPI, and Product Hunt before you build, returns reality_signal (0-100).
+Mnemox Idea Reality MCP Server v0.4.0 — pre-build reality check for AI coding agents.
+`idea_check` scans GitHub, HN, npm, PyPI, Product Hunt → returns reality_signal (0-100).
+**Status: 暫停開發中，持續監測流量。** Google SEO 第一大來源，持續有不同國家用戶查詢。236 stars。
 
-## Org
-- GitHub: mnemox-ai/idea-reality-mcp
-- Parent brand: Mnemox (mnemox.ai)
-- Sister projects: tradememory-protocol (AI trading memory layer), **idea-check-action** (GitHub Action wrapper)
-- Lead: Sean (sean.sys) — directs AI agents to build systems
-
-## Tech Stack
-- Python 3.11+, FastMCP 3.x, httpx (async), uv
-- Sources: GitHub Search API, HN Algolia API, npm Registry, PyPI (HTML scraping), Product Hunt GraphQL (optional)
-- Entry: `python -m idea_reality_mcp` or `uv run python -m idea_reality_mcp`
+## Quick Ref
+- GitHub: mnemox-ai/idea-reality-mcp | PyPI: idea-reality-mcp
 - Tests: `uv run pytest tests/ -v` (148 tests)
+- Entry: `python -m idea_reality_mcp` or `uv run python -m idea_reality_mcp`
+- Tech: Python 3.11+, FastMCP 3.x, httpx (async), uv
 
----
-
-## Architecture (穩定參考)
+## Architecture
 
 ```
 src/idea_reality_mcp/
 ├── server.py          # FastMCP server
-├── tools.py           # idea_check tool (quick + deep mode, asyncio.gather)
+├── tools.py           # idea_check (quick + deep, asyncio.gather)
 ├── scoring/
-│   ├── engine.py      # reality_signal weighted formula + 3-stage keyword extraction
-│   ├── synonyms.py    # INTENT_ANCHORS (90+) + SYNONYMS dict (80+ keys)
-│   └── llm.py         # Claude Haiku integration (MCP client → Render API)
-└── sources/
-    ├── __init__.py    # exports all sources
-    ├── github.py      # GitHub Search API adapter
-    ├── hn.py          # HN Algolia API adapter
-    ├── npm.py         # npm Registry JSON API adapter
-    ├── pypi.py        # PyPI HTML scraping adapter
-    └── producthunt.py # Product Hunt GraphQL adapter (optional, needs token)
+│   ├── engine.py      # reality_signal formula + 3-stage keyword extraction
+│   ├── synonyms.py    # INTENT_ANCHORS (90+) + SYNONYMS (80+)
+│   └── llm.py         # Haiku 4.5 integration (Render API)
+└── sources/           # github.py, hn.py, npm.py, pypi.py, producthunt.py
 
 api/
-├── main.py            # FastAPI wrapper (REST + MCP Streamable HTTP)
-├── db.py              # Score History — SQLite storage layer
+├── main.py            # FastAPI (REST + MCP Streamable HTTP)
+├── db.py              # Score History (SQLite)
 └── requirements.txt
-
-templates/             # Agent instruction templates (copy-paste snippets)
-├── CLAUDE.md          # Claude Code
-├── cursorrules.md     # Cursor
-├── copilot-instructions.md  # GitHub Copilot
-├── windsurf-rules.md  # Windsurf
-└── README.md          # Usage guide
-
-examples/
-├── agent-instructions.md  # All platforms in one file (incl. Windsurf, Copilot)
-├── sample_prompts.md / .zh-TW.md
-├── claude_desktop_config.json
-└── cursor_mcp_config.json
-
-drafts/
-├── devto-v034.md
-└── devto-agent-instructions.md  # Agent auto-check article (938 words)
 ```
 
-### API Endpoints (Render: https://idea-reality-mcp.onrender.com)
-- `GET  /health` — liveness probe
-- `POST /api/check` — body: `{idea_text, depth}` → full report + idea_hash + score saved to history
-- `POST /api/extract-keywords` — LLM extraction (Haiku 4.5, rate-limited 50/IP/day)
-- `GET  /api/history/{idea_hash}` — score history for an idea
-- `POST /api/subscribe` — body: `{email, idea_hash}` → email collection (dual-write: SQLite + stdout)
-- `GET  /api/subscribers/count` — subscriber metrics
-- `ANY  /mcp` — MCP Streamable HTTP transport
-
-### Score History (api/db.py)
-- SQLite, `SCORE_DB_PATH` env var or `./score_history.db`
-- **Known limitation**: Render free tier wipes filesystem on deploy. Data lost on restart.
-- Future: migrate to Turso (SQLite cloud) or Render PostgreSQL
-- Schema: idea_hash (SHA256), idea_text, score, breakdown (JSON), keywords (JSON), depth, lang, keyword_source, created_at
+## API Endpoints (Render: https://idea-reality-mcp.onrender.com)
+- `POST /api/check` — `{idea_text, depth}` → report + idea_hash
+- `POST /api/extract-keywords` — Haiku 4.5 (50/IP/day)
+- `GET  /api/history/{idea_hash}` — score history
+- `POST /api/subscribe` — email collection (dual-write: SQLite + stdout)
+- `ANY  /mcp` — MCP Streamable HTTP
+- Render env: ANTHROPIC_API_KEY + GITHUB_TOKEN + DISCORD_WEBHOOK_URL + EXPORT_KEY
 
 ## Modes
-- **quick** (default): GitHub + HN — weights: repos 60% + stars 20% + HN 20%
-- **deep**: all 5 sources in parallel — weights: repos 25% + stars 10% + HN 15% + npm 20% + PyPI 15% + PH 15%
-- PH weight auto-redistributed when PRODUCTHUNT_TOKEN not set
+- **quick**: GitHub + HN (repos 60% + stars 20% + HN 20%)
+- **deep**: 5 sources parallel (repos 25% + stars 10% + HN 15% + npm 20% + PyPI 15% + PH 15%)
 
-## Key Design Decisions (穩定參考)
-- Protocol, not SaaS — no dashboard, no website UI (except /check demo)
-- Zero storage by default — MCP stdio stores nothing; Render API stores score history
-- GITHUB_TOKEN optional — works without but rate-limited (10 req/min)
-- PRODUCTHUNT_TOKEN optional — skipped gracefully if not set
-- Scoring is intentionally simple and explainable, not ML
+## Key Design Decisions
+- Protocol, not SaaS — no dashboard, no user accounts
+- Zero storage by default (MCP stdio stores nothing)
+- Scoring: simple, explainable, not ML
 - Graceful degradation — partial results if any source fails
-- Chinese support via dictionary (150+ terms) for MCP stdio; LLM (Haiku 4.5) for Render API
+- Discord webhook = 永久查詢資料庫（每次 /api/check 自動推送）
 
----
+## v0.5 Ideas (when resumed)
+- Temporal Signals: recent_created_ratio + recently_active_ratio
+- Decision Tracking: build/pivot/kill buttons
 
-## Current Status (會變動)
+## Community Lessons
+- MCP 設計哲學 = tool description 即文件，不需要塞 instruction 到 agent config
+- 差異化不在搜尋品質，在 agent 自動觸發
+- Email gate 在結果尾巴 = 低轉換率（已確認 0 subscribers）
 
-### v0.4.0 (current, stable)
-- ✅ Core MCP server (stdio + Streamable HTTP)
-- ✅ 5 sources: GitHub, HN, npm, PyPI, Product Hunt
-- ✅ 3-stage keyword extraction + LLM extraction (Render)
-- ✅ 148/148 tests passing
-- ✅ LLM pivot hints (Haiku 4.5, real competitor data, fallback to template)
-- ✅ `[PIVOT]` diagnostic logging for Render logs
-- ✅ Score History (SQLite, /api/history endpoint)
-- ✅ Email gate + subscribe endpoint (POST /api/subscribe, GET /api/subscribers/count)
-- ✅ Language param (en/zh) in API + LLM pivot hints
-- ✅ Language-change banner (3s auto-dismiss when toggling with results visible)
-- ✅ Agent templates — simplified to one-line hints (community feedback)
-- ✅ idea-check-action GitHub Action (mnemox-ai/idea-check-action)
-- ✅ Published: PyPI + GitHub Release + MCP Registry + Smithery + 10+ directories
-- ✅ Live demo: mnemox.ai/check (with email gate + SEO + JSON-LD)
-- ✅ Full bilingual docs (EN + zh-TW)
-- ✅ SEO: sitemap.xml, robots.txt, OG/Twitter/JSON-LD for both pages
-- ✅ Cursor Marketplace plugin submitted (awaiting review)
-- ✅ Render env: ANTHROPIC_API_KEY + GITHUB_TOKEN configured
-- ✅ README rewrite: automation-first value prop + "Why not Google?" section
-
-### idea-check-action (v1)
-- GitHub: mnemox-ai/idea-check-action (public)
-- Composite action: `pip install idea-reality-mcp` → `entrypoint.py`
-- Inputs: idea, depth, github-token, threshold
-- Outputs: score, report (JSON), top-competitor
-- Graceful failure: never breaks CI (::warning:: on error)
-- Self-test workflow (.github/workflows/test.yml)
-
----
-
-## Planning Rules (穩定參考)
-
-1. **Every new feature field must have an "implementation cost" estimate.**
-2. **No architecture design for features beyond the next 2 versions.**
-3. **"Cool but not now" filter.** — Does Sean have enough users/data today?
-4. **Data claims need math.**
-5. **One solo developer = max 2 priorities at a time.**
-
-## Priorities (會變動)
-
-### Priority 1: v0.5 (next)
-- **Temporal Signals**: recent_created_ratio + recently_active_ratio, top 3 competitor activity
-- **Decision Tracking**: decision buttons (build/pivot/kill), linked to email + idea_hash
-
-### Priority 2: Distribution (ongoing)
-- Cursor Marketplace review pending (submitted 2026-03-01, contact: dev@mnemox.ai)
-- Monitor Show HN + Dev.to comments
-- Post DEV.to agent instructions article (draft ready)
-- Follow up: Glama, PR #2346 (pinged), ClaudeMCP #45, mcp-get #176, Fleur #37
-
-### Future Ideas (do NOT elaborate)
-- Privacy mode / local LLM / Tor / decoy queries → v2.0+
-- Decision Framework full version → after ground truth data
-- Agent session memory / follow-up → v1.0+
-- competitor_health detailed → v0.5
-
----
-
-## Community Feedback Log（持續累積）
-
-### 2026-03-01 Reddit r/ClaudeAI
-- **反饋**：Agent instruction templates 過度工程化。MCP tool description 本身已告訴 agent 何時 call，不需要把 instruction 塞進 CLAUDE.md/.cursorrules 浪費 context window token。
-- **修正**：templates/ 全部精簡為一行 hint，README 把 MCP 安裝設為主要，agent instruction 設為可選。
-- **學到的**：MCP 設計哲學 = tool description 即文件。Threshold 邏輯（>80 STOP）是 tool 的責任，不該寫在 agent config 裡。開發者社群對 over-engineering 很敏感。
-
-### 2026-03-01 「Why not Google?」 — 社群最常問的問題
-- **回答框架**：差異不在搜尋品質，在觸發機制。Google 需要 human intent，idea-reality-mcp 靠 agent 自動觸發
-- **一句話版本**：「不是你在用它，是你的 Agent 在用。這才是重點。」
-- **README 改動**：副標題從 accuracy（We search. They guess.）改為 automation（Your AI agent checks before it builds. Automatically.）
-- **新增 3 欄比較表**：Google vs ChatGPT/SaaS vs idea-reality-mcp
-
-### 2026-03-01 UX 審查發現
-- **Email gate 放在結果尾巴**：使用者已看到 signal + evidence + competitors，hints 是最不值錢的部分。Gate 最不值錢的部分 = 低轉換率
-- **冷啟動 timeout 15s 太短**：Render free tier 30-50s，第一次用的人 100% 遇到 timeout error
-- **README 沒有在前 10 秒回答「跟 Google 差在哪」**：第一次來的人會直接離開
-
-### Release 後同步更新 Checklist
-每次 release 後必須逐一檢查：
-1. pyproject.toml + __init__.py + engine.py（版號）
-2. api/main.py（FastAPI title）
-3. server.json（MCP Registry ×2）
-4. tests/test_scoring.py + test_server_smoke.py
-5. CHANGELOG.md + CHANGELOG.zh-TW.md
-6. .claude/instructions.md（此檔 Current Status）
-7. mnemox-ai.github.io/index.html（project stat）
-8. mnemox-github-profile/profile/README.md
-9. Git tag + GitHub Release + 確認 PyPI CI
-
----
-
-## Communication Style
-- Sean prefers 繁體中文 for discussion, English for code/docs
-- Direct, no-BS, honest feedback over optimistic reassurance
-- "先可用再變強" — ship first, optimize later
-
-## When Working On This Project
-1. Always run tests after changes: `uv run pytest tests/ -v`
+## Rules
+1. Run tests after changes: `uv run pytest tests/ -v`
 2. Keep scoring formula explainable
-3. Don't add SaaS features (no auth, no dashboard, no user accounts)
-4. README is marketing — keep it sharp and technical
-5. Every new source goes in sources/ as its own adapter file
-6. Follow existing patterns: dataclass for results, async with httpx, evidence list
-7. Post-release: run the sync checklist above, don't rely on memory
+3. No SaaS features
+4. README is marketing — sharp and technical
+5. New sources → `sources/` as own adapter file
+6. Post-release: sync checklist (pyproject → api/main → server.json → CHANGELOG → website → profile → PyPI)

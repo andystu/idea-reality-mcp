@@ -10,9 +10,11 @@ Exposes:
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 import os
+import uuid
 from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Literal
@@ -21,7 +23,11 @@ import httpx
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+
+from html import escape as html_escape
 
 from idea_reality_mcp.scoring.engine import compute_signal, extract_keywords
 from idea_reality_mcp.server import mcp  # registers all tools via server.py
@@ -34,6 +40,8 @@ from idea_reality_mcp.sources.pypi import search_pypi
 import sys
 sys.path.insert(0, os.path.dirname(__file__))
 import db as score_db
+import report as report_mod
+import stripe_utils
 
 logger = logging.getLogger(__name__)
 
@@ -103,7 +111,7 @@ app = FastAPI(
 )
 
 # Initialize DB tables (idempotent — CREATE TABLE IF NOT EXISTS)
-score_db.init_db()
+score_db.init_db()  # also calls init_query_log_table + init_reports_table
 score_db.init_subscribers_table()
 
 # CORS — allow GitHub Pages and local dev
@@ -141,6 +149,14 @@ class ExtractKeywordsRequest(BaseModel):
 class SubscribeRequest(BaseModel):
     email: str
     idea_hash: str
+
+
+class CheckoutRequest(BaseModel):
+    idea_text: str
+    idea_hash: str
+    language: Literal["en", "zh"] = "en"
+    success_url: str
+    cancel_url: str
 
 
 # ---------------------------------------------------------------------------
@@ -361,7 +377,7 @@ async def extract_keywords_endpoint(req: ExtractKeywordsRequest, request: Reques
 
 
 @app.post("/api/check")
-async def check(req: CheckRequest):
+async def check(req: CheckRequest, request: Request):
     """Run an idea reality check.
 
     Body: { "idea_text": "...", "depth": "quick" | "deep" }
@@ -471,6 +487,19 @@ async def check(req: CheckRequest):
         top_similar=top_sim_name,
     )
 
+    # Save query log (SHA256 hashed IP, no PII)
+    try:
+        client_ip = request.client.host if request.client else "unknown"
+        ip_hash = hashlib.sha256(client_ip.encode()).hexdigest()
+        score_db.save_query_log(
+            ip_hash=ip_hash,
+            idea_hash=result["idea_hash"],
+            depth=req.depth,
+            score=result["reality_signal"],
+        )
+    except Exception:
+        logger.exception("Failed to save query log")
+
     return result
 
 
@@ -517,6 +546,68 @@ async def subscribers_count():
     return {"count": count}
 
 
+@app.get("/api/stats")
+async def query_stats():
+    """Return query usage stats (total queries, unique IPs, return rate)."""
+    try:
+        stats = score_db.get_query_stats()
+    except Exception:
+        logger.exception("Failed to get query stats")
+        raise HTTPException(status_code=500, detail="Stats unavailable")
+    return stats
+
+
+class PageViewRequest(BaseModel):
+    page: str
+
+
+@app.post("/api/view")
+async def record_page_view(req: PageViewRequest):
+    """Record a page view.
+
+    Body: { "page": "report" }
+    """
+    if not req.page or not req.page.strip():
+        raise HTTPException(status_code=422, detail="page cannot be empty")
+    try:
+        score_db.save_page_view(req.page.strip())
+    except Exception:
+        logger.exception("Failed to save page view")
+    return {"ok": True}
+
+
+@app.get("/api/social-proof")
+async def social_proof():
+    """Return social proof stats for the landing page."""
+    total_checks = 0
+    last_check_ago = None
+    try:
+        total_checks = score_db.get_total_checks()
+        last_check_ts = score_db.get_last_check_time()
+        if last_check_ts:
+            last_dt = datetime.fromisoformat(last_check_ts)
+            if last_dt.tzinfo is None:
+                last_dt = last_dt.replace(tzinfo=timezone.utc)
+            delta = datetime.now(timezone.utc) - last_dt
+            secs = int(delta.total_seconds())
+            if secs < 60:
+                last_check_ago = f"{secs}s ago"
+            elif secs < 3600:
+                last_check_ago = f"{secs // 60}m ago"
+            elif secs < 86400:
+                last_check_ago = f"{secs // 3600}h ago"
+            else:
+                last_check_ago = f"{secs // 86400}d ago"
+    except Exception:
+        logger.exception("Failed to get social proof stats")
+    return {
+        "total_checks": total_checks,
+        "github_stars": 236,
+        "countries": "30+",
+        "last_check_ago": last_check_ago,
+    }
+
+
 @app.get("/api/export")
 async def export_scores(key: str = ""):
     """Export all score history as JSON (requires secret key).
@@ -536,6 +627,375 @@ async def export_scores(key: str = ""):
         raise HTTPException(status_code=500, detail="Export failed")
     return {"count": len(records), "records": records}
 
+
+@app.get("/report/{report_id}/pdf")
+async def report_pdf(report_id: str):
+    """Download report as HTML file (MVP — upgrade to weasyprint later)."""
+    record = score_db.get_report(report_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Report not found")
+
+    report_data = record.get("report_data", {})
+    if isinstance(report_data, str):
+        try:
+            report_data = json.loads(report_data)
+        except (json.JSONDecodeError, TypeError):
+            report_data = {}
+
+    report = report_data.get("report", {})
+    score_exp = report.get("score_explanation", {})
+    market = report.get("market_pulse", {})
+    competitors = report.get("extended_competitors", [])
+    llm = report.get("llm_analysis", {})
+
+    comp_rows = ""
+    for c in competitors[:10]:
+        stars = f" ({c.get('stars', 0):,} stars)" if c.get("stars") else ""
+        comp_rows += (
+            f"<li><strong>{html_escape(c.get('name', ''))}</strong>{stars}"
+            f"<br>{html_escape(c.get('description', ''))}</li>"
+        )
+
+    trend_map = {"increasing": "Increasing", "decreasing": "Decreasing", "stable": "Stable"}
+    trend_label = trend_map.get(market.get("trend", ""), market.get("trend", "N/A"))
+
+    html_content = (
+        "<!DOCTYPE html><html><head><meta charset='UTF-8'>"
+        "<title>Idea Reality Report</title><style>"
+        "body{font-family:Arial,sans-serif;max-width:800px;margin:0 auto;padding:40px 20px;color:#333}"
+        "h1{color:#00cc66;border-bottom:2px solid #00cc66;padding-bottom:10px}"
+        "h2{color:#555;margin-top:30px}"
+        ".score{font-size:48px;font-weight:bold;color:#00cc66;text-align:center;margin:20px 0}"
+        ".section{margin:24px 0;padding:16px;background:#f9f9f9;border-radius:8px}"
+        "li{margin:8px 0}p{line-height:1.6}"
+        ".footer{margin-top:40px;text-align:center;color:#888;font-size:12px}"
+        "</style></head><body>"
+        "<h1>Idea Reality &mdash; Full Report</h1>"
+        f"<p><strong>Idea:</strong> {html_escape(record.get('idea_text', ''))}</p>"
+        f"<div class='score'>{record.get('score', 0)}/100</div>"
+        "<h2>Score Breakdown</h2>"
+        f"<div class='section'><p>{html_escape(score_exp.get('summary', ''))}</p></div>"
+        "<h2>Market Pulse</h2>"
+        f"<div class='section'><p>Similar ideas: {market.get('similar_count', 0)} | "
+        f"Average score: {market.get('avg_score', 0)}/100 | Trend: {trend_label}</p></div>"
+        "<h2>Competitor Analysis</h2>"
+        f"<div class='section'><ol>{comp_rows or '<li>No competitors found</li>'}</ol></div>"
+        "<h2>Differentiation Strategy</h2>"
+        f"<div class='section'><p>{html_escape(llm.get('differentiation_strategy', ''))}</p></div>"
+        "<h2>Go-to-Market Recommendation</h2>"
+        f"<div class='section'><p>{html_escape(llm.get('gtm_recommendation', ''))}</p></div>"
+        "<h2>Risk Assessment</h2>"
+        f"<div class='section'><p>{html_escape(llm.get('risk_assessment', ''))}</p></div>"
+        f"<div class='footer'>Generated by Mnemox Idea Reality | {html_escape(record.get('created_at', ''))}</div>"
+        "</body></html>"
+    )
+
+    return HTMLResponse(
+        content=html_content,
+        headers={
+            "Content-Disposition": f'attachment; filename="idea-reality-report-{report_id[:8]}.html"',
+        },
+    )
+
+
+@app.post("/report/{report_id}/translate")
+async def translate_report(report_id: str, lang: str = "en"):
+    """Re-generate LLM analysis in a different language and update the report."""
+    record = score_db.get_report(report_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Report not found")
+
+    report_data = record.get("report_data", {})
+    if isinstance(report_data, str):
+        try:
+            report_data = json.loads(report_data)
+        except (json.JSONDecodeError, TypeError):
+            raise HTTPException(status_code=500, detail="Invalid report data")
+
+    report = report_data.get("report", {})
+    competitors = report.get("extended_competitors", [])
+
+    llm_analysis = await report_mod._generate_llm_analysis(
+        idea_text=record.get("idea_text", ""),
+        signal_result=report_data,
+        competitors=competitors,
+        language=lang,
+    )
+
+    report["llm_analysis"] = llm_analysis
+    report_data["report"] = report
+
+    score_db.update_report_data(report_id, json.dumps(report_data), lang)
+
+    record["report_data"] = report_data
+    record["language"] = lang
+    return record
+
+
+@app.get("/report/{report_id}")
+async def get_report(report_id: str):
+    """Retrieve a saved report by ID.
+
+    Returns the full report JSON, or 404 if not found.
+    """
+    record = score_db.get_report(report_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Report not found")
+    # Parse report_data back to dict if stored as JSON string
+    if isinstance(record.get("report_data"), str):
+        try:
+            record["report_data"] = json.loads(record["report_data"])
+        except (json.JSONDecodeError, TypeError):
+            pass
+    return record
+
+
+class ReportPreviewRequest(BaseModel):
+    idea_text: str
+    depth: Literal["quick", "deep"] = "quick"
+
+
+@app.post("/api/report/preview")
+async def report_preview(req: ReportPreviewRequest, request: Request):
+    """Run compute_signal but return blurred preview — section titles + first 50 chars only.
+
+    Body: { "idea_text": "...", "depth": "quick" | "deep" }
+    """
+    if not req.idea_text or not req.idea_text.strip():
+        raise HTTPException(status_code=422, detail="idea_text cannot be empty")
+
+    idea_text = req.idea_text.strip()
+    keywords = extract_keywords(idea_text)
+
+    try:
+        if req.depth == "deep":
+            github_results, hn_results, npm_results, pypi_results, ph_results = (
+                await asyncio.gather(
+                    search_github_repos(keywords),
+                    search_hn(keywords),
+                    search_npm(keywords),
+                    search_pypi(keywords),
+                    search_producthunt(keywords),
+                )
+            )
+            result = compute_signal(
+                idea_text=idea_text,
+                keywords=keywords,
+                github_results=github_results,
+                hn_results=hn_results,
+                depth=req.depth,
+                npm_results=npm_results,
+                pypi_results=pypi_results,
+                ph_results=ph_results,
+            )
+        else:
+            github_results, hn_results = await asyncio.gather(
+                search_github_repos(keywords),
+                search_hn(keywords),
+            )
+            result = compute_signal(
+                idea_text=idea_text,
+                keywords=keywords,
+                github_results=github_results,
+                hn_results=hn_results,
+                depth=req.depth,
+            )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    # Build blurred preview: reality_signal is visible, sections show title + first 50 chars
+    preview: dict = {
+        "reality_signal": result["reality_signal"],
+        "duplicate_likelihood": result.get("duplicate_likelihood"),
+        "idea_hash": score_db.idea_hash(idea_text),
+        "preview": True,
+    }
+
+    # Blur evidence — show type/source + truncated detail
+    if result.get("evidence"):
+        preview["evidence"] = [
+            {
+                "type": e.get("type", ""),
+                "source": e.get("source", ""),
+                "detail": (e.get("detail", "") or "")[:50] + "...",
+            }
+            for e in result["evidence"]
+        ]
+
+    # Blur top_similars — show name only, truncate description
+    if result.get("top_similars"):
+        preview["top_similars"] = [
+            {
+                "name": s.get("name", ""),
+                "description": (s.get("description", "") or "")[:50] + "...",
+            }
+            for s in result["top_similars"]
+        ]
+
+    # Blur pivot_hints — first 50 chars each
+    if result.get("pivot_hints"):
+        preview["pivot_hints"] = [
+            hint[:50] + "..." for hint in result["pivot_hints"]
+        ]
+
+    return preview
+
+
+# ---------------------------------------------------------------------------
+# Stripe payment endpoints
+# ---------------------------------------------------------------------------
+
+@app.post("/api/create-checkout")
+async def create_checkout(req: CheckoutRequest):
+    """Create a Stripe Checkout session for a paid report.
+
+    Body: { "idea_text": "...", "idea_hash": "...", "language": "en",
+            "success_url": "https://...", "cancel_url": "https://..." }
+    Returns: { "checkout_url": "https://checkout.stripe.com/..." }
+    """
+    if not stripe_utils._get_stripe_key():
+        raise HTTPException(status_code=503, detail="Stripe is not configured")
+
+    if not req.idea_text or not req.idea_text.strip():
+        raise HTTPException(status_code=422, detail="idea_text cannot be empty")
+
+    try:
+        url = stripe_utils.create_checkout_session(
+            idea_text=req.idea_text.strip(),
+            idea_hash=req.idea_hash,
+            language=req.language,
+            success_url=req.success_url,
+            cancel_url=req.cancel_url,
+        )
+    except Exception as exc:
+        logger.exception("Stripe checkout session creation failed")
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    return {"checkout_url": url}
+
+
+@app.post("/api/stripe-webhook")
+async def stripe_webhook(request: Request):
+    """Handle Stripe webhook events.
+
+    On checkout.session.completed:
+      1. Extract idea_text from metadata
+      2. Run compute_signal + generate_report
+      3. Save report to DB with buyer_email
+    """
+    if not stripe_utils._get_webhook_secret():
+        raise HTTPException(status_code=503, detail="Stripe webhook is not configured")
+
+    payload = await request.body()
+    sig_header = request.headers.get("stripe-signature", "")
+
+    try:
+        event = stripe_utils.verify_webhook(payload, sig_header)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid payload")
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid signature")
+
+    if event["type"] == "checkout.session.completed":
+        session = event["data"]["object"]
+        metadata = session.get("metadata", {})
+        idea_text = metadata.get("idea_text", "")
+        idea_hash = metadata.get("idea_hash", "")
+        language = metadata.get("language", "en")
+        buyer_email = session.get("customer_details", {}).get("email")
+        stripe_session_id = session.get("id")
+
+        if idea_text:
+            try:
+                # Run the same pipeline as /api/check
+                keywords = extract_keywords(idea_text)
+                github_results, hn_results = await asyncio.gather(
+                    search_github_repos(keywords),
+                    search_hn(keywords),
+                )
+                signal_result = compute_signal(
+                    idea_text=idea_text,
+                    keywords=keywords,
+                    github_results=github_results,
+                    hn_results=hn_results,
+                    depth="quick",
+                )
+
+                # Generate full report
+                full_report = await report_mod.generate_report(
+                    idea_text=idea_text,
+                    signal_result=signal_result,
+                    language=language,
+                )
+
+                # Merge signal_result + full_report
+                report_data = {**signal_result, "report": full_report}
+
+                # Save report
+                report_id = str(uuid.uuid4())
+                score_db.save_report(
+                    report_id=report_id,
+                    idea_text=idea_text,
+                    idea_hash=idea_hash or score_db.idea_hash(idea_text),
+                    score=signal_result["reality_signal"],
+                    report_data=json.dumps(report_data),
+                    language=language,
+                    stripe_session_id=stripe_session_id,
+                    buyer_email=buyer_email,
+                )
+                logger.info(
+                    "[STRIPE] Report saved: report_id=%s, email=%s, score=%d",
+                    report_id, buyer_email, signal_result["reality_signal"],
+                )
+            except Exception:
+                logger.exception("[STRIPE] Failed to generate/save report for session %s", stripe_session_id)
+
+    return {"received": True}
+
+
+@app.get("/api/checkout-status")
+async def checkout_status(session_id: str):
+    """Check Stripe checkout session status and return report_id if available."""
+    if not stripe_utils._get_stripe_key():
+        raise HTTPException(status_code=503, detail="Stripe is not configured")
+
+    try:
+        status = stripe_utils.get_session_status(session_id)
+    except Exception as exc:
+        logger.exception("Failed to retrieve Stripe session")
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    result = {
+        "payment_status": status["payment_status"],
+        "status": status["status"],
+    }
+
+    if status["payment_status"] == "paid":
+        report = score_db.get_report_by_stripe_session(session_id)
+        if report:
+            result["report_id"] = report["report_id"]
+
+    return result
+
+
+# ---------------------------------------------------------------------------
+# GET / — redirect to report page
+# ---------------------------------------------------------------------------
+
+@app.get("/")
+async def root():
+    return RedirectResponse("/static/report.html")
+
+
+# ---------------------------------------------------------------------------
+# Mount static files at /static (before MCP catch-all)
+# ---------------------------------------------------------------------------
+
+app.mount(
+    "/static",
+    StaticFiles(directory=os.path.join(os.path.dirname(__file__), "static")),
+    name="static",
+)
 
 # ---------------------------------------------------------------------------
 # Mount MCP Streamable HTTP at /mcp

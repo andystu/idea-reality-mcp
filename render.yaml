@@ -12,3 +12,7 @@ services:
         sync: false   # set manually in Render dashboard (optional)
       - key: ANTHROPIC_API_KEY
         sync: false   # set manually in Render dashboard
+      - key: STRIPE_SECRET_KEY
+        sync: false   # set manually in Render dashboard
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false   # set manually in Render dashboard
