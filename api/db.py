@@ -1,9 +1,11 @@
 """Score history — Turso Cloud (persistent) + SQLite (local fallback).
 
-Connection strategy:
-- TURSO_DATABASE_URL + TURSO_AUTH_TOKEN set → libsql_experimental embedded replica
-  (local file synced with Turso Cloud — reads fast, writes persist remotely)
-- Not set → local sqlite3 (dev / tests)
+Connection strategy (in order of preference):
+1. TURSO_DATABASE_URL set → libsql_client (pure Python HTTP, works everywhere)
+2. Not set → local sqlite3 (dev / tests)
+
+libsql_client is wrapped in TursoConnection/TursoCursor to mimic the
+sqlite3 API, so all downstream code works unchanged.
 """
 
 from __future__ import annotations
@@ -26,22 +28,100 @@ TURSO_AUTH_TOKEN = os.environ.get("TURSO_AUTH_TOKEN")
 DB_PATH = os.environ.get("SCORE_DB_PATH", "./score_history.db")
 
 _use_turso = False
-_libsql = None
+_turso_client = None  # lazy-init sync client
+
+
+def _turso_url() -> str:
+    """Convert libsql:// URL to https:// for HTTP API."""
+    url = TURSO_DATABASE_URL or ""
+    if url.startswith("libsql://"):
+        return url.replace("libsql://", "https://", 1)
+    return url
+
 
 if TURSO_DATABASE_URL and TURSO_AUTH_TOKEN:
     try:
-        import libsql_experimental as _libsql  # type: ignore[import-untyped]
+        import libsql_client  # type: ignore[import-untyped]
 
         _use_turso = True
-        logger.info("[DB] Turso mode: %s", TURSO_DATABASE_URL[:60])
+        logger.info("[DB] Turso HTTP mode: %s", _turso_url()[:60])
     except ImportError:
         logger.warning(
-            "[DB] TURSO_DATABASE_URL set but libsql_experimental not installed. "
+            "[DB] TURSO_DATABASE_URL set but libsql_client not installed. "
             "Falling back to local SQLite."
         )
 
 if not _use_turso:
     logger.info("[DB] Local SQLite mode: %s", DB_PATH)
+
+
+# ---------------------------------------------------------------------------
+# Turso wrapper — mimics sqlite3.Connection / sqlite3.Cursor
+# ---------------------------------------------------------------------------
+
+
+class TursoCursor:
+    """Wraps libsql_client.ResultSet to mimic sqlite3.Cursor."""
+
+    def __init__(self, result):
+        self._result = result
+        self._rows = list(result.rows) if result.rows else []
+        self._columns = list(result.columns) if result.columns else []
+        self._index = 0
+
+    @property
+    def description(self):
+        if self._columns:
+            return [(col, None, None, None, None, None, None) for col in self._columns]
+        return None
+
+    @property
+    def lastrowid(self):
+        return getattr(self._result, "last_insert_rowid", None)
+
+    def fetchall(self):
+        return self._rows
+
+    def fetchone(self):
+        if self._index < len(self._rows):
+            row = self._rows[self._index]
+            self._index += 1
+            return row
+        return None
+
+
+class TursoConnection:
+    """Wraps libsql_client sync client to mimic sqlite3.Connection."""
+
+    def __init__(self, client):
+        self._client = client
+
+    def execute(self, sql, params=()):
+        result = self._client.execute(sql, list(params))
+        return TursoCursor(result)
+
+    def commit(self):
+        pass  # Turso HTTP auto-commits
+
+    def close(self):
+        pass  # Persistent client, reused across calls
+
+    def sync(self):
+        pass  # HTTP mode, no local replica to sync
+
+
+def _get_turso_client():
+    """Get or create the Turso sync client (singleton)."""
+    global _turso_client
+    if _turso_client is None:
+        import libsql_client
+
+        _turso_client = libsql_client.create_client_sync(
+            url=_turso_url(),
+            auth_token=TURSO_AUTH_TOKEN,
+        )
+        logger.info("[DB] Turso client created: %s", _turso_url()[:60])
+    return _turso_client
 
 
 # ---------------------------------------------------------------------------
@@ -52,20 +132,11 @@ if not _use_turso:
 def _get_conn():
     """Get a database connection.
 
-    Turso: embedded replica (local file + remote sync).
+    Turso: HTTP client wrapped in sqlite3-like API.
     SQLite: plain local file with Row factory.
     """
     if _use_turso:
-        conn = _libsql.connect(
-            DB_PATH,
-            sync_url=TURSO_DATABASE_URL,
-            auth_token=TURSO_AUTH_TOKEN,
-        )
-        try:
-            conn.sync()
-        except Exception as exc:
-            logger.warning("[DB] Turso sync on connect failed: %s", exc)
-        return conn
+        return TursoConnection(_get_turso_client())
 
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
@@ -73,12 +144,8 @@ def _get_conn():
 
 
 def _sync_after_write(conn) -> None:
-    """Sync embedded replica after writes so next read sees the change."""
-    if _use_turso:
-        try:
-            conn.sync()
-        except Exception as exc:
-            logger.warning("[DB] Turso sync after write failed: %s", exc)
+    """No-op for HTTP mode. Kept for API compatibility."""
+    pass
 
 
 def _rows_to_dicts(cursor) -> list[dict[str, Any]]:
