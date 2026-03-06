@@ -546,7 +546,12 @@
     btn.disabled = true;
     btn.textContent = 'Redirecting to checkout...';
 
+    // Save to localStorage so we can retrieve after redirect
+    try { localStorage.setItem('ir_idea_hash', currentIdeaHash); } catch(e) {}
+    try { localStorage.setItem('ir_idea_text', currentIdeaText); } catch(e) {}
+
     try {
+      const successUrl = window.location.origin + '/static/report.html?paid=1&idea_hash=' + encodeURIComponent(currentIdeaHash);
       const res = await fetch(API + '/api/create-checkout', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
@@ -554,7 +559,7 @@
           idea_text: currentIdeaText,
           idea_hash: currentIdeaHash,
           language: 'en',
-          success_url: window.location.origin + '/static/report.html?paid=1',
+          success_url: successUrl,
         }),
       });
 
@@ -591,17 +596,20 @@
     show($('#loading'));
 
     // LemonSqueezy webhook generates the report async.
-    // We poll checkout-status which looks up the report by order_id.
-    // Since we don't have the order_id from LS redirect, we check
-    // for the most recent report matching our idea_hash.
+    // We poll checkout-status using idea_hash (from URL or localStorage).
     const params = new URLSearchParams(window.location.search);
     const orderId = params.get('order_id') || '';
+    const ideaHash = params.get('idea_hash') || '';
+    let storedHash = '';
+    try { storedHash = localStorage.getItem('ir_idea_hash') || ''; } catch(e) {}
+    const lookupHash = ideaHash || storedHash;
 
     try {
       let url = API + '/api/checkout-status?';
-      if (orderId) {
-        url += 'order_id=' + encodeURIComponent(orderId);
-      }
+      const qParts = [];
+      if (orderId) qParts.push('order_id=' + encodeURIComponent(orderId));
+      if (lookupHash) qParts.push('idea_hash=' + encodeURIComponent(lookupHash));
+      url += qParts.join('&');
 
       const res = await fetch(url);
       if (!res.ok) throw new Error('Failed to check payment status');

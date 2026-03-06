@@ -319,11 +319,22 @@ def get_last_check_time() -> str | None:
 
 
 def get_report_by_stripe_session(stripe_session_id: str) -> dict[str, Any] | None:
-    """Get a report by its Stripe session ID."""
+    """Get a report by its Stripe/LemonSqueezy order ID."""
     conn = _get_conn()
     row = conn.execute(
         "SELECT * FROM reports WHERE stripe_session_id = ?",
         (stripe_session_id,),
+    ).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def get_report_by_idea_hash(idea_hash_val: str) -> dict[str, Any] | None:
+    """Get the most recent report for a given idea_hash."""
+    conn = _get_conn()
+    row = conn.execute(
+        "SELECT * FROM reports WHERE idea_hash = ? ORDER BY created_at DESC LIMIT 1",
+        (idea_hash_val,),
     ).fetchone()
     conn.close()
     return dict(row) if row else None

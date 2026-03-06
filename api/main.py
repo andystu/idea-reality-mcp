@@ -948,20 +948,23 @@ async def lemon_webhook(request: Request):
 
 
 @app.get("/api/checkout-status")
-async def checkout_status(order_id: str = "", session_id: str = ""):
+async def checkout_status(order_id: str = "", session_id: str = "", idea_hash: str = ""):
     """Check payment status and return report_id.
 
-    Accepts order_id (LemonSqueezy) or session_id (legacy Stripe, kept for compat).
-    Looks up the report in DB by order/session ID.
-    If not found but order_id is provided, tries to fetch from LemonSqueezy API
-    and regenerate the report.
+    Accepts order_id (LemonSqueezy), session_id (legacy), or idea_hash.
+    Looks up the report in DB. If not found but order_id is provided,
+    tries to fetch from LemonSqueezy API and regenerate the report.
     """
     lookup_id = order_id or session_id
-    if not lookup_id:
-        raise HTTPException(status_code=422, detail="order_id or session_id required")
+    if not lookup_id and not idea_hash:
+        raise HTTPException(status_code=422, detail="order_id, session_id, or idea_hash required")
 
-    # Look up in DB first
-    report = score_db.get_report_by_stripe_session(lookup_id)
+    # Look up in DB first — by order ID or idea_hash
+    report = None
+    if lookup_id:
+        report = score_db.get_report_by_stripe_session(lookup_id)
+    if not report and idea_hash:
+        report = score_db.get_report_by_idea_hash(idea_hash)
     if report:
         return {
             "payment_status": "paid",
