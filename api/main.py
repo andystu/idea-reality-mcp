@@ -698,36 +698,12 @@ async def report_pdf(report_id: str):
 
 @app.post("/report/{report_id}/translate")
 async def translate_report(report_id: str, lang: str = "en"):
-    """Re-generate LLM analysis in a different language and update the report."""
-    record = score_db.get_report(report_id)
-    if record is None:
-        raise HTTPException(status_code=404, detail="Report not found")
+    """Re-generate strategic analysis in a different language.
 
-    report_data = record.get("report_data", {})
-    if isinstance(report_data, str):
-        try:
-            report_data = json.loads(report_data)
-        except (json.JSONDecodeError, TypeError):
-            raise HTTPException(status_code=500, detail="Invalid report data")
-
-    report = report_data.get("report", {})
-    competitors = report.get("extended_competitors", [])
-
-    llm_analysis = await report_mod._generate_llm_analysis(
-        idea_text=record.get("idea_text", ""),
-        signal_result=report_data,
-        competitors=competitors,
-        language=lang,
-    )
-
-    report["llm_analysis"] = llm_analysis
-    report_data["report"] = report
-
-    score_db.update_report_data(report_id, json.dumps(report_data), lang)
-
-    record["report_data"] = report_data
-    record["language"] = lang
-    return record
+    NOTE: Language switching is deprioritized for V1.0. This endpoint is
+    kept as a stub but returns 501 until the feature is implemented.
+    """
+    raise HTTPException(status_code=501, detail="Language switching not yet available")
 
 
 @app.get("/report/{report_id}")

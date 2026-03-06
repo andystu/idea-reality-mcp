@@ -452,3 +452,42 @@ def get_last_check_time() -> str | None:
     ).fetchone()
     conn.close()
     return row[0] if row else None
+
+
+# ---------------------------------------------------------------------------
+# Crowd Intelligence — similar idea queries (for paid reports)
+# ---------------------------------------------------------------------------
+
+
+def search_similar_ideas(
+    keywords: list[str],
+    exclude_hash: str | None = None,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    """Search score_history for ideas matching any keyword (LIKE).
+
+    Returns list of dicts with keys: idea_text, score, depth, lang, created_at.
+    """
+    words = [w for w in keywords if len(w) >= 3][:5]
+    if not words:
+        return []
+
+    conditions = " OR ".join(["idea_text LIKE ?"] * len(words))
+    params: list = [f"%{w}%" for w in words]
+
+    sql = (
+        "SELECT idea_text, score, depth, lang, created_at "
+        "FROM score_history WHERE (" + conditions + ")"
+    )
+    if exclude_hash:
+        sql += " AND idea_hash != ?"
+        params.append(exclude_hash)
+
+    sql += " ORDER BY created_at DESC LIMIT ?"
+    params.append(limit)
+
+    conn = _get_conn()
+    cur = conn.execute(sql, params)
+    result = _rows_to_dicts(cur)
+    conn.close()
+    return result
