@@ -54,6 +54,14 @@ def _build_score_breakdown(signal_result: dict) -> dict:
         })
 
     # Score interpretation — factual, no opinion
+    explanations = {
+        "very_low": "Your idea has very little existing competition — this is rare and promising.",
+        "low": "Few direct matches found. The market has room for new entrants.",
+        "moderate": "Some existing projects, but meaningful differentiation is possible.",
+        "high": "Active projects across multiple sources. Strong differentiation needed.",
+        "very_high": "Multiple established projects. Consider a very specific niche or unique angle.",
+    }
+
     if score >= 80:
         level = "very_high"
         summary = f"Very high competition ({score}/100). Multiple established projects exist."
@@ -74,6 +82,7 @@ def _build_score_breakdown(signal_result: dict) -> dict:
         "score": score,
         "level": level,
         "summary": summary,
+        "explanation": explanations[level],
         "duplicate_likelihood": dup,
         "source_bars": bars,
         "total_signals": total_signals,
@@ -102,10 +111,17 @@ def _build_crowd_intelligence(idea_text: str, idea_hash: str, score: int) -> dic
         limit=50,
     )
 
+    # Total database size for context
+    total_checks = score_db.get_total_checks()
+
     if not similar:
         return {
             "similar_count": 0,
-            "message": "No similar queries found in our database yet.",
+            "total_database_queries": total_checks,
+            "message": (
+                f"Your idea is unique among {total_checks} queries in our database. "
+                f"No one has searched for anything similar yet."
+            ),
         }
 
     scores = [s["score"] for s in similar]
@@ -117,18 +133,25 @@ def _build_crowd_intelligence(idea_text: str, idea_hash: str, score: int) -> dic
         d = s.get("depth", "quick")
         depth_counts[d] = depth_counts.get(d, 0) + 1
 
-    # Total database size for context
-    total_checks = score_db.get_total_checks()
+    # Score comparison
+    if score > avg_score + 10:
+        score_comparison = "higher than"
+    elif score < avg_score - 10:
+        score_comparison = "lower than"
+    else:
+        score_comparison = "similar to"
 
     return {
         "similar_count": len(similar),
         "avg_score": avg_score,
         "your_score": score,
+        "score_comparison": score_comparison,
         "total_database_queries": total_checks,
         "depth_breakdown": depth_counts,
         "message": (
             f"{len(similar)} people searched for similar ideas. "
-            f"Average competition score: {avg_score}/100."
+            f"Average competition score: {avg_score}/100. "
+            f"Your score is {score_comparison} the average."
         ),
     }
 

@@ -59,6 +59,7 @@ async def create_checkout(
     idea_hash: str,
     language: str,
     success_url: str,
+    depth: str = "quick",
 ) -> str:
     """Create a LemonSqueezy checkout session.
 
@@ -94,6 +95,7 @@ async def create_checkout(
                         "idea_text": idea_text[:500],
                         "idea_hash": idea_hash,
                         "language": language,
+                        "depth": depth,
                     },
                 },
             },

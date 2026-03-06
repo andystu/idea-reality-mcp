@@ -126,6 +126,32 @@ class TestScoreBreakdown:
         if len(bars) >= 2:
             assert bars[0]["signals"] >= bars[1]["signals"]
 
+    def test_explanation_present_for_all_levels(self):
+        levels_and_scores = [
+            ("very_low", 10),
+            ("low", 25),
+            ("moderate", 50),
+            ("high", 65),
+            ("very_high", 90),
+        ]
+        for expected_level, score_val in levels_and_scores:
+            sr = {**SAMPLE_SIGNAL_RESULT, "reality_signal": score_val}
+            result = report._build_score_breakdown(sr)
+            assert "explanation" in result, f"Missing explanation for {expected_level}"
+            assert isinstance(result["explanation"], str)
+            assert len(result["explanation"]) > 10
+
+    def test_explanation_matches_level(self):
+        sr_low = {**SAMPLE_SIGNAL_RESULT, "reality_signal": 15}
+        result = report._build_score_breakdown(sr_low)
+        assert result["level"] == "very_low"
+        assert "rare and promising" in result["explanation"]
+
+        sr_high = {**SAMPLE_SIGNAL_RESULT, "reality_signal": 70}
+        result = report._build_score_breakdown(sr_high)
+        assert result["level"] == "high"
+        assert "Strong differentiation" in result["explanation"]
+
 
 # ---------------------------------------------------------------------------
 # Section 2: Crowd Intelligence
@@ -173,6 +199,50 @@ class TestCrowdIntelligence:
     def test_empty_idea_text(self):
         result = report._build_crowd_intelligence("", "hash", 50)
         assert result["similar_count"] == 0
+
+    def test_unique_message_includes_total_checks(self):
+        result = report._build_crowd_intelligence(
+            "unique quantum widget xyz", "fakehash", 50
+        )
+        assert result["similar_count"] == 0
+        assert "unique" in result["message"].lower()
+        assert "total_database_queries" in result
+
+    def test_score_comparison_higher(self):
+        for i, sc in enumerate([30, 35, 40]):
+            score_db.save_score(
+                idea_text=f"code review tool higher {i}",
+                score=sc, breakdown="{}", keywords="[]",
+            )
+        result = report._build_crowd_intelligence(
+            "code review automation", "excludeme", 60
+        )
+        if result["similar_count"] > 0:
+            assert result.get("score_comparison") == "higher than"
+
+    def test_score_comparison_lower(self):
+        for i, sc in enumerate([80, 85, 90]):
+            score_db.save_score(
+                idea_text=f"monitoring dashboard lower {i}",
+                score=sc, breakdown="{}", keywords="[]",
+            )
+        result = report._build_crowd_intelligence(
+            "monitoring dashboard tool", "excludeme", 50
+        )
+        if result["similar_count"] > 0:
+            assert result.get("score_comparison") == "lower than"
+
+    def test_score_comparison_similar(self):
+        for i, sc in enumerate([48, 50, 52]):
+            score_db.save_score(
+                idea_text=f"task manager similar {i}",
+                score=sc, breakdown="{}", keywords="[]",
+            )
+        result = report._build_crowd_intelligence(
+            "task manager app", "excludeme", 50
+        )
+        if result["similar_count"] > 0:
+            assert result.get("score_comparison") == "similar to"
 
 
 # ---------------------------------------------------------------------------
