@@ -1149,6 +1149,11 @@ async def root():
     return RedirectResponse("/static/report.html")
 
 
+@app.get("/report.html")
+async def report_redirect():
+    return RedirectResponse("/static/report.html")
+
+
 # ---------------------------------------------------------------------------
 # Mount static files at /static (before MCP catch-all)
 # ---------------------------------------------------------------------------

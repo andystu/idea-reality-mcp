@@ -4,6 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Mnemox Idea Reality — Pre-build Reality Check</title>
+<meta name="description" content="Pre-build reality check for your next idea. Scan GitHub, Hacker News, npm, PyPI & Product Hunt before you build.">
+<meta property="og:title" content="Mnemox Idea Reality — Pre-build Reality Check">
+<meta property="og:description" content="Check if your product idea already exists. Powered by real data from GitHub, HN, npm, PyPI & Product Hunt.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://idea-reality-mcp.onrender.com/static/report.html">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="Mnemox Idea Reality — Pre-build Reality Check">
+<meta name="twitter:description" content="Check if your product idea already exists. Scan 5 sources before you build.">
 <style>
   *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
   body{
@@ -422,7 +430,7 @@
       {
         title: 'Crowd Intelligence',
         visible: 'See how many builders explored similar ideas in our database.',
-        blurred: 'N builders searched for similar ideas in the past 30 days. Average competition score across similar queries. Depth breakdown: quick scans vs deep scans reveal builder intent levels.',
+        blurred: `${$('#ideas-count').textContent || '900+'} builders searched for similar ideas in the past 30 days. Average competition score across similar queries. Depth breakdown: quick scans vs deep scans reveal builder intent levels.`,
       },
       {
         title: 'Real Competitors (Top 10)',
@@ -454,7 +462,12 @@
   $('#check-btn').addEventListener('click', async () => {
     const input = $('#idea-input');
     const text = input.value.trim();
-    if (!text) return;
+    if (!text) {
+      input.style.border = '1px solid #ff4444';
+      input.setAttribute('placeholder', 'Please describe your idea first...');
+      setTimeout(() => { input.style.border = ''; }, 2000);
+      return;
+    }
 
     const depth = $('#depth-select').value;
     const btn = $('#check-btn');
@@ -509,7 +522,7 @@
       // Evidence
       const evidenceList = $('#evidence-list');
       evidenceList.innerHTML = '';
-      (data.evidence || []).slice(0, 3).forEach(ev => {
+      (data.evidence || []).forEach(ev => {
         const li = document.createElement('li');
         li.innerHTML = `<span style="color:#888">[${esc(ev.source)}]</span> ${esc(ev.detail)}`;
         evidenceList.appendChild(li);
