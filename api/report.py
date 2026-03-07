@@ -249,7 +249,16 @@ async def _build_competitor_analysis(signal_result: dict) -> list[dict]:
             except Exception:
                 continue
 
-    all_repos = [r for r in all_repos if not _is_noise_repo(r)]
+    # Build relevance keywords from query strings
+    relevance_kws: list[str] = []
+    kw_set: set[str] = set()
+    for q in keywords[:3]:
+        for w in q.lower().split():
+            if len(w) >= 4:
+                kw_set.add(w)
+    relevance_kws = list(kw_set) or None
+
+    all_repos = [r for r in all_repos if not _is_noise_repo(r, query_keywords=relevance_kws)]
 
     # Dedupe and sort by (hit_count, stars)
     seen: set[str] = set()

@@ -627,13 +627,17 @@ async def export_scores(key: str = ""):
     return {"count": len(records), "records": records}
 
 
-@app.get("/report/{report_id}/pdf")
-async def report_pdf(report_id: str):
-    """Download report as HTML file (MVP — upgrade to weasyprint later)."""
-    record = score_db.get_report(report_id)
-    if record is None:
-        raise HTTPException(status_code=404, detail="Report not found")
+_SOURCE_COLORS = {
+    "github": "#00cc66",
+    "hackernews": "#ff6600",
+    "npm": "#cb3837",
+    "pypi": "#3775a9",
+    "producthunt": "#da552f",
+}
 
+
+def _build_report_html(record: dict, report_id: str) -> str:
+    """Build a self-contained dark-theme HTML report for download."""
     report_data = record.get("report_data", {})
     if isinstance(report_data, str):
         try:
@@ -642,49 +646,205 @@ async def report_pdf(report_id: str):
             report_data = {}
 
     report = report_data.get("report", report_data)
-
-    # V1.0 report structure
     score_breakdown = report.get("score_breakdown", {})
     crowd = report.get("crowd_intelligence", {})
     competitors = report.get("competitors", [])
     strategic = report.get("strategic_analysis", "")
+    score = record.get("score", 0)
+    idea_text = record.get("idea_text", "")
 
-    comp_rows = ""
+    # Score circle color
+    if score >= 70:
+        score_color = "#ff4444"
+    elif score >= 40:
+        score_color = "#ff9800"
+    else:
+        score_color = "#00cc66"
+
+    # Source bars HTML
+    bars_html = ""
+    for bar in score_breakdown.get("source_bars", []):
+        src = bar.get("source", "unknown")
+        pct = bar.get("percentage", 0)
+        signals = bar.get("signals", 0)
+        color = _SOURCE_COLORS.get(src, "#666")
+        bars_html += (
+            f'<div class="bar-row">'
+            f'<span class="bar-label">{html_escape(src)}</span>'
+            f'<div class="bar-track"><div class="bar-fill" style="width:{pct}%;background:{color}"></div></div>'
+            f'<span class="bar-val">{signals}</span>'
+            f'</div>'
+        )
+
+    # Competitors HTML
+    comp_html = ""
     for c in competitors[:10]:
         activity = c.get("activity", {})
         badge = activity.get("badge", "")
-        stars = f" ({c.get('stars', 0):,} stars)" if c.get("stars") else ""
-        comp_rows += (
-            f"<li>{badge} <strong>{html_escape(c.get('name', ''))}</strong>{stars}"
-            f"<br>{html_escape(c.get('description', ''))}</li>"
+        label = activity.get("label", "")
+        days = activity.get("days_since_update")
+        days_str = f" &middot; Updated {days}d ago" if days is not None else ""
+        lang = c.get("language", "")
+        lang_tag = f'<span class="lang-tag">{html_escape(lang)}</span>' if lang else ""
+        url = c.get("url", "")
+        name = html_escape(c.get("name", ""))
+        desc = html_escape(c.get("description", ""))
+        stars_val = c.get("stars", 0)
+        comp_html += (
+            f'<div class="comp">'
+            f'<div class="comp-header">'
+            f'<span class="badge">{badge}</span> '
+            f'<a href="{html_escape(url)}" class="comp-name">{name}</a>'
+            f'<span class="comp-stars">{stars_val:,} stars</span>'
+            f'{lang_tag}'
+            f'</div>'
+            f'<p class="comp-desc">{desc}</p>'
+            f'<span class="comp-meta">{html_escape(label.capitalize())}{days_str}</span>'
+            f'</div>'
         )
+    if not comp_html:
+        comp_html = '<p class="empty">No competitors found.</p>'
 
-    html_content = (
-        "<!DOCTYPE html><html><head><meta charset='UTF-8'>"
-        "<title>Idea Reality Report</title><style>"
-        "body{font-family:Arial,sans-serif;max-width:800px;margin:0 auto;padding:40px 20px;color:#333}"
-        "h1{color:#00cc66;border-bottom:2px solid #00cc66;padding-bottom:10px}"
-        "h2{color:#555;margin-top:30px}"
-        ".score{font-size:48px;font-weight:bold;color:#00cc66;text-align:center;margin:20px 0}"
-        ".section{margin:24px 0;padding:16px;background:#f9f9f9;border-radius:8px}"
-        "li{margin:8px 0}p{line-height:1.6}"
-        ".footer{margin-top:40px;text-align:center;color:#888;font-size:12px}"
-        "</style></head><body>"
-        "<h1>Idea Reality &mdash; Full Report</h1>"
-        f"<p><strong>Idea:</strong> {html_escape(record.get('idea_text', ''))}</p>"
-        f"<div class='score'>{record.get('score', 0)}/100</div>"
-        "<h2>Score Breakdown</h2>"
-        f"<div class='section'><p>{html_escape(score_breakdown.get('summary', ''))}</p>"
-        f"<p>Duplicate likelihood: <strong>{html_escape(score_breakdown.get('duplicate_likelihood', 'unknown'))}</strong></p></div>"
-        "<h2>Crowd Intelligence</h2>"
-        f"<div class='section'><p>{html_escape(crowd.get('message', 'No similar queries found.'))}</p></div>"
-        "<h2>Competitor Analysis</h2>"
-        f"<div class='section'><ol>{comp_rows or '<li>No competitors found</li>'}</ol></div>"
-        "<h2>Strategic Analysis</h2>"
-        f"<div class='section'><p>{html_escape(strategic)}</p></div>"
-        f"<div class='footer'>Generated by Mnemox Idea Reality | {html_escape(record.get('created_at', ''))} | Report ID: {html_escape(report_id)}</div>"
-        "</body></html>"
-    )
+    # Strategic analysis paragraphs
+    strat_html = ""
+    if strategic:
+        for p in strategic.split("\n\n"):
+            p = p.strip()
+            if p:
+                strat_html += f"<p>{html_escape(p)}</p>"
+    else:
+        strat_html = "<p>Strategic analysis not available.</p>"
+
+    # Crowd message
+    crowd_msg = html_escape(crowd.get("message", "No similar queries found."))
+
+    # Duplicate likelihood styling
+    dup = score_breakdown.get("duplicate_likelihood", "unknown")
+    dup_colors = {"high": "#ff4444", "medium": "#ff9800", "low": "#00cc66"}
+    dup_color = dup_colors.get(dup, "#888")
+
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Idea Reality Report — {html_escape(idea_text[:60])}</title>
+<style>
+*,*::before,*::after{{box-sizing:border-box;margin:0;padding:0}}
+body{{
+  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+  background:#0a0a0a;color:#e0e0e0;line-height:1.7;
+  max-width:800px;margin:0 auto;padding:48px 32px;
+}}
+a{{color:#00cc66;text-decoration:none}}
+a:hover{{text-decoration:underline}}
+.brand{{text-align:center;margin-bottom:40px}}
+.brand h1{{font-size:24px;font-weight:700;color:#fff}}
+.brand h1 span{{color:#00cc66}}
+.brand .subtitle{{color:#888;font-size:13px;margin-top:4px}}
+.idea-text{{
+  background:#111;border:1px solid #222;border-radius:8px;
+  padding:16px 20px;margin:24px 0;font-size:15px;color:#ccc;
+}}
+.score-section{{text-align:center;margin:32px 0}}
+.score-circle{{
+  width:120px;height:120px;border-radius:50%;
+  border:4px solid {score_color};
+  display:inline-flex;align-items:center;justify-content:center;
+  flex-direction:column;
+}}
+.score-num{{font-size:40px;font-weight:800;color:{score_color};line-height:1}}
+.score-sub{{font-size:12px;color:#888}}
+.dup-badge{{
+  display:inline-block;margin-top:12px;padding:4px 14px;
+  border-radius:20px;font-size:12px;font-weight:600;
+  background:{dup_color}22;color:{dup_color};border:1px solid {dup_color}44;
+}}
+h2{{
+  font-size:16px;font-weight:700;color:#00cc66;
+  margin:36px 0 16px;padding-bottom:8px;
+  border-bottom:1px solid #1a1a1a;
+}}
+.section{{background:#111;border:1px solid #222;border-radius:8px;padding:20px;margin-bottom:20px}}
+.bar-row{{display:flex;align-items:center;gap:10px;margin:8px 0}}
+.bar-label{{width:100px;font-size:12px;color:#888;text-transform:capitalize}}
+.bar-track{{flex:1;height:8px;background:#1a1a1a;border-radius:4px;overflow:hidden}}
+.bar-fill{{height:100%;border-radius:4px}}
+.bar-val{{width:40px;font-size:12px;color:#888;text-align:right}}
+.comp{{background:#0d0d0d;border:1px solid #1a1a1a;border-radius:8px;padding:14px 16px;margin:10px 0}}
+.comp-header{{display:flex;align-items:center;gap:8px;flex-wrap:wrap}}
+.badge{{font-size:16px}}
+.comp-name{{font-weight:600;color:#00cc66;font-size:14px}}
+.comp-stars{{font-size:12px;color:#888}}
+.lang-tag{{font-size:11px;color:#aaa;background:#1a1a1a;padding:2px 8px;border-radius:10px}}
+.comp-desc{{font-size:13px;color:#999;margin:6px 0 4px;line-height:1.5}}
+.comp-meta{{font-size:11px;color:#666}}
+.strat p{{margin-bottom:16px;font-size:14px;color:#ccc}}
+.crowd-msg{{font-size:14px;color:#ccc}}
+.empty{{color:#666;font-style:italic}}
+.footer{{
+  margin-top:48px;padding-top:20px;border-top:1px solid #1a1a1a;
+  text-align:center;color:#555;font-size:11px;
+}}
+.footer a{{color:#00cc66}}
+</style>
+</head>
+<body>
+
+<div class="brand">
+  <h1><span>Mnemox</span> Idea Reality</h1>
+  <div class="subtitle">Pre-build reality check &mdash; Full Intelligence Report</div>
+</div>
+
+<div class="idea-text">{html_escape(idea_text)}</div>
+
+<div class="score-section">
+  <div class="score-circle">
+    <span class="score-num">{score}</span>
+    <span class="score-sub">/ 100</span>
+  </div>
+  <div><span class="dup-badge">Duplicate likelihood: {html_escape(dup)}</span></div>
+</div>
+
+<h2>Score Breakdown</h2>
+<div class="section">
+  <p style="margin-bottom:12px;font-size:14px">{html_escape(score_breakdown.get('summary', ''))}</p>
+  <p style="margin-bottom:16px;font-size:13px;color:#999">{html_escape(score_breakdown.get('explanation', ''))}</p>
+  {bars_html}
+</div>
+
+<h2>Crowd Intelligence</h2>
+<div class="section">
+  <p class="crowd-msg">{crowd_msg}</p>
+</div>
+
+<h2>Real Competitors</h2>
+<div class="section">
+  {comp_html}
+</div>
+
+<h2>Strategic Analysis</h2>
+<div class="section strat">
+  {strat_html}
+</div>
+
+<div class="footer">
+  Generated by <a href="https://idea-reality-mcp.onrender.com">Mnemox Idea Reality</a>
+  &middot; {html_escape(record.get('created_at', ''))}
+  &middot; Report ID: {html_escape(report_id[:8])}
+</div>
+
+</body>
+</html>"""
+
+
+@app.get("/report/{report_id}/pdf")
+async def report_pdf(report_id: str):
+    """Download report as self-contained HTML file."""
+    record = score_db.get_report(report_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Report not found")
+
+    html_content = _build_report_html(record, report_id)
 
     return HTMLResponse(
         content=html_content,

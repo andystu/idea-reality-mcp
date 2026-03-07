@@ -613,12 +613,22 @@
     hide($('#paywall'));
     hide($('#error-msg'));
 
-    // Show loading
+    // Show loading with progress steps
     const loadDiv = document.createElement('div');
     loadDiv.className = 'loading';
     loadDiv.id = 'payment-loading';
-    loadDiv.innerHTML = '<span class="spinner"></span> Generating your intelligence report...';
+    loadDiv.innerHTML = '<span class="spinner"></span> <span id="load-step">Scanning sources...</span>'
+      + '<div style="width:200px;height:4px;background:#1a1a1a;border-radius:2px;margin:12px auto 0">'
+      + '<div id="load-bar" style="height:100%;width:0%;background:#00cc66;border-radius:2px;transition:width 0.5s"></div></div>';
     document.body.insertBefore(loadDiv, $('footer'));
+
+    const _steps = ['Scanning sources...','Analyzing competitors...','Generating strategic analysis...','Finalizing report...'];
+    let _stepIdx = 0;
+    const _stepTimer = setInterval(() => {
+      _stepIdx = Math.min(_stepIdx + 1, _steps.length - 1);
+      const el = document.getElementById('load-step');
+      if (el) el.textContent = _steps[_stepIdx];
+    }, 4000);
 
     const params = new URLSearchParams(window.location.search);
     const orderId = params.get('order_id') || '';
@@ -630,9 +640,11 @@
 
     const lookupHash = ideaHash || storedHash;
 
-    // Poll checkout-status
+    // Poll checkout-status (1s interval, 30s timeout)
     let reportData = null;
-    for (let i = 0; i < 20; i++) {
+    for (let i = 0; i < 30; i++) {
+      const bar = document.getElementById('load-bar');
+      if (bar) bar.style.width = Math.min((i / 25) * 100, 95) + '%';
       try {
         const res = await fetch(API + '/api/checkout-status', {
           method: 'POST',
@@ -647,7 +659,7 @@
         if (res.ok) {
           const data = await res.json();
           if (data.status === 'complete' && data.report_id) {
-            // Fetch full report
+            if (bar) bar.style.width = '100%';
             const rr = await fetch(API + '/report/' + data.report_id);
             if (rr.ok) {
               reportData = await rr.json();
@@ -656,8 +668,9 @@
           }
         }
       } catch (e) { /* retry */ }
-      await new Promise(r => setTimeout(r, 2000));
+      await new Promise(r => setTimeout(r, 1000));
     }
+    clearInterval(_stepTimer);
 
     // Remove loading
     const ld = $('#payment-loading');

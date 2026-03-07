@@ -57,8 +57,8 @@ class TestSearchGitHubReposSuccess:
     async def test_search_github_repos_success(self):
         """Mock a successful API response with repos and verify GitHubResults."""
         items = [
-            _github_repo_item("owner/repo-a", stars=500, description="Alpha"),
-            _github_repo_item("owner/repo-b", stars=200, description="Beta"),
+            _github_repo_item("owner/repo-a", stars=500, description="A test framework for query validation"),
+            _github_repo_item("owner/repo-b", stars=200, description="Query builder test suite"),
         ]
         api_response = {"total_count": 42, "items": items}
 
@@ -104,7 +104,7 @@ class TestSearchGitHubReposMissingName:
     async def test_search_github_repos_missing_name(self):
         """Ignore items without a full_name to avoid empty repo entries."""
         items = [
-            _github_repo_item("owner/repo-a", stars=500, description="Alpha"),
+            _github_repo_item("owner/repo-a", stars=500, description="A test framework for query tools"),
             {"full_name": "", "stargazers_count": 999, "html_url": "", "updated_at": ""},
         ]
         api_response = {"total_count": 2, "items": items}
@@ -146,9 +146,9 @@ class TestSearchGitHubReposDeduplication:
     @pytest.mark.asyncio
     async def test_search_github_repos_deduplication(self):
         """Mock responses with duplicate repo names across keyword queries, verify dedup."""
-        shared_repo = _github_repo_item("owner/shared-repo", stars=300)
-        unique_repo_a = _github_repo_item("owner/unique-a", stars=150)
-        unique_repo_b = _github_repo_item("owner/unique-b", stars=100)
+        shared_repo = _github_repo_item("owner/shared-repo", stars=300, description="Code review automation tool")
+        unique_repo_a = _github_repo_item("owner/unique-a", stars=150, description="Automated code review for teams")
+        unique_repo_b = _github_repo_item("owner/unique-b", stars=100, description="Code analysis review engine")
 
         response_1 = {"total_count": 10, "items": [shared_repo, unique_repo_a]}
         response_2 = {"total_count": 8, "items": [shared_repo, unique_repo_b]}
@@ -162,7 +162,7 @@ class TestSearchGitHubReposDeduplication:
         mock_client.__aexit__ = AsyncMock(return_value=False)
 
         with patch("idea_reality_mcp.sources.github.httpx.AsyncClient", return_value=mock_client):
-            result = await search_github_repos(["keyword1", "keyword2"])
+            result = await search_github_repos(["code review", "review tool"])
 
         assert isinstance(result, GitHubResults)
         # total_count is summed across queries
