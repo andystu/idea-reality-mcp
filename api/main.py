@@ -156,6 +156,7 @@ class CheckoutRequest(BaseModel):
     language: Literal["en", "zh"] = "en"
     depth: Literal["quick", "deep"] = "quick"
     success_url: str
+    tier: Literal["single", "pro"] = "single"
 
 
 # ---------------------------------------------------------------------------
@@ -1193,6 +1194,7 @@ async def create_checkout(req: CheckoutRequest):
             language=req.language,
             success_url=req.success_url,
             depth=req.depth,
+            tier=req.tier,
         )
     except Exception as exc:
         logger.exception("LemonSqueezy checkout creation failed")
@@ -1230,6 +1232,7 @@ async def lemon_webhook(request: Request):
         idea_hash_val = custom_data.get("idea_hash", "")
         language = custom_data.get("language", "en")
         depth = custom_data.get("depth", "quick")
+        tier = custom_data.get("tier", "single")
         buyer_email = attrs.get("user_email", "")
         order_id = str(event.get("data", {}).get("id", ""))
 
@@ -1277,6 +1280,7 @@ async def lemon_webhook(request: Request):
                     idea_text=idea_text,
                     signal_result=signal_result,
                     language=language,
+                    tier=tier,
                 )
 
                 report_data = {**signal_result, "report": full_report, "keyword_source": keyword_source}
@@ -1309,8 +1313,12 @@ async def _generate_report_on_the_fly(
     order_id: str = "",
     buyer_email: str = "",
     depth: str = "quick",
+    tier: str = "single",
 ) -> dict:
     """Generate a paid report from scratch and save to DB.
+
+    Args:
+        tier: "single" or "pro" — controls multi-angle scanning
 
     Returns {"payment_status": "paid", "status": "complete", "report_id": ...}.
     Raises on failure.
@@ -1356,6 +1364,7 @@ async def _generate_report_on_the_fly(
         idea_text=idea_text,
         signal_result=signal_result,
         language=language,
+        tier=tier,
     )
     report_data = {**signal_result, "report": full_report, "keyword_source": keyword_source}
     report_id = str(uuid.uuid4())
@@ -1369,7 +1378,7 @@ async def _generate_report_on_the_fly(
         stripe_session_id=order_id or None,
         buyer_email=buyer_email or None,
     )
-    logger.info("[CHECKOUT] Report generated on-the-fly: report_id=%s", report_id)
+    logger.info("[CHECKOUT] Report generated on-the-fly: report_id=%s, tier=%s", report_id, tier)
     return {
         "payment_status": "paid",
         "status": "complete",
@@ -1383,6 +1392,7 @@ async def _checkout_status_logic(
     idea_hash: str = "",
     idea_text: str = "",
     depth: str = "",
+    tier: str = "single",
 ) -> dict:
     """Shared logic for GET and POST checkout-status.
 
@@ -1421,6 +1431,7 @@ async def _checkout_status_logic(
                     idea_text=idea_text.strip(),
                     idea_hash_val=idea_hash,
                     depth=depth or "quick",
+                    tier=tier,
                 )
             except Exception:
                 logger.exception("[CHECKOUT] On-the-fly generation failed for idea_hash=%s", idea_hash[:16])
@@ -1437,6 +1448,7 @@ async def _checkout_status_logic(
                 language = custom.get("language", "en")
                 idea_hash_val = custom.get("idea_hash", "")
                 lemon_depth = custom.get("depth", "quick")
+                lemon_tier = custom.get("tier", "single")
 
                 if lemon_idea_text:
                     try:
@@ -1447,6 +1459,7 @@ async def _checkout_status_logic(
                             order_id=order_id,
                             buyer_email=order_attrs.get("user_email", ""),
                             depth=lemon_depth,
+                            tier=lemon_tier,
                         )
                     except Exception:
                         logger.exception("[LEMON] Report generation failed for order %s", order_id)
@@ -1476,6 +1489,7 @@ class CheckoutStatusRequest(BaseModel):
     idea_hash: str = ""
     idea_text: str = ""
     depth: str = ""
+    tier: str = "single"
 
 
 @app.post("/api/checkout-status")
@@ -1492,6 +1506,7 @@ async def checkout_status_post(req: CheckoutStatusRequest):
         idea_hash=req.idea_hash,
         idea_text=req.idea_text,
         depth=req.depth,
+        tier=req.tier,
     )
 
 

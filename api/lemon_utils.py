@@ -35,8 +35,10 @@ def _get_webhook_secret() -> str | None:
     return (os.environ.get("LEMONSQUEEZY_WEBHOOK_SECRET") or "").strip() or None
 
 
-def _get_variant_id() -> str:
-    """Return variant ID (default product variant)."""
+def _get_variant_id(tier: str = "single") -> str:
+    """Return variant ID for the given tier."""
+    if tier == "pro":
+        return (os.environ.get("LEMONSQUEEZY_PRO_VARIANT_ID") or "").strip() or "0"
     return (os.environ.get("LEMONSQUEEZY_VARIANT_ID") or "").strip() or "1374049"
 
 
@@ -60,8 +62,12 @@ async def create_checkout(
     language: str,
     success_url: str,
     depth: str = "quick",
+    tier: str = "single",
 ) -> str:
     """Create a LemonSqueezy checkout session.
+
+    Args:
+        tier: "single" ($9.99 one-time) or "pro" ($39/mo subscription)
 
     Returns the checkout URL.
     Raises ValueError if LemonSqueezy is not configured.
@@ -71,18 +77,23 @@ async def create_checkout(
     if not api_key:
         raise ValueError("LemonSqueezy is not configured")
 
-    variant_id = _get_variant_id()
+    variant_id = _get_variant_id(tier)
     store_id = _get_store_id()
+
+    if tier == "pro" and variant_id == "0":
+        raise ValueError("Pro subscription variant is not configured (set LEMONSQUEEZY_PRO_VARIANT_ID)")
+
+    receipt_text = "View Your Report" if tier == "single" else "Start Using Pro"
 
     payload = {
         "data": {
             "type": "checkouts",
             "attributes": {
-                "custom_price": None,  # Use product price ($9.99)
+                "custom_price": None,
                 "product_options": {
                     "enabled_variants": [int(variant_id)],
                     "redirect_url": success_url,
-                    "receipt_button_text": "View Your Report",
+                    "receipt_button_text": receipt_text,
                     "receipt_link_url": success_url,
                 },
                 "checkout_options": {
@@ -96,6 +107,7 @@ async def create_checkout(
                         "idea_hash": idea_hash,
                         "language": language,
                         "depth": depth,
+                        "tier": tier,
                     },
                 },
             },

@@ -708,6 +708,11 @@ def compute_signal(
     if ph_results:
         evidence.extend(ph_results.evidence)
 
+    # Add queried_at timestamp to all evidence items for credibility
+    _now = datetime.now(timezone.utc).isoformat()
+    for ev in evidence:
+        ev["queried_at"] = _now
+
     # Top similars: merge GitHub repos with npm/PyPI/PH entries
     top_similars = list(github_results.top_repos)
     if npm_results:

@@ -545,39 +545,71 @@ async def _generate_strategic_analysis(
 # ---------------------------------------------------------------------------
 
 
+def _build_single_competitors(signal_result: dict) -> list[dict]:
+    """Build competitor list from existing signal_result data (zero extra API calls).
+
+    Uses top_similars already computed by engine.py.
+    """
+    similars = signal_result.get("top_similars", [])
+    competitors = []
+    for s in similars:
+        name = s.get("name", "")
+        # Skip npm:/pypi:/ph: prefixed entries — they're packages, not direct competitors
+        if ":" in name and name.split(":")[0] in ("npm", "pypi", "ph"):
+            continue
+        comp = {
+            "name": name,
+            "url": s.get("url", ""),
+            "stars": s.get("stars", 0),
+            "description": (s.get("description") or "")[:300],
+            "updated": s.get("updated", ""),
+            "language": s.get("language", ""),
+            "activity": _activity_badge(s.get("updated", "")),
+            "found_via_angles": [],  # single tier: no multi-angle
+        }
+        competitors.append(comp)
+    return competitors[:8]
+
+
 async def generate_report(
     idea_text: str,
     signal_result: dict,
     language: str = "en",
+    tier: str = "single",
 ) -> dict:
     """Generate a paid report from compute_signal() output.
+
+    Args:
+        tier: "single" (no extra API calls) or "pro" (multi-angle scan)
 
     Returns dict with keys:
     - search_angles: list of search perspectives used
     - sub_scores: per-source sub-dimension scores
     - score_breakdown: per-source signal bars
     - crowd_intelligence: similar queries data
-    - competitors: top 15 from multi-angle scan with activity badges
+    - competitors: verified competitors with activity badges
     - strategic_analysis: Sonnet-generated cohesive analysis (string)
     - verified_at: ISO timestamp of report generation
     """
     idea_h = score_db.idea_hash(idea_text)
     score = signal_result.get("reality_signal", 0)
 
-    # Generate search angles (Haiku LLM, fallback to evidence queries)
-    angles = await _generate_search_angles(idea_text)
-    if len(angles) <= 1:
-        # Haiku failed or no API key — use evidence queries as fallback
-        fallback = _fallback_angles_from_evidence(signal_result)
-        if fallback:
-            angles = fallback
+    if tier == "pro":
+        # Pro tier: multi-angle scan (3-5 perspectives, 15 competitors)
+        angles = await _generate_search_angles(idea_text)
+        if len(angles) <= 1:
+            fallback = _fallback_angles_from_evidence(signal_result)
+            if fallback:
+                angles = fallback
+        competitors = await _build_multi_angle_competitors(angles, signal_result)
+    else:
+        # Single tier: use existing scan data (zero extra API calls)
+        angles = [idea_text]
+        competitors = _build_single_competitors(signal_result)
 
     score_breakdown = _build_score_breakdown(signal_result)
     crowd = _build_crowd_intelligence(idea_text, idea_h, score)
     sub_scores = signal_result.get("sub_scores", {})
-
-    # Multi-angle competitor scan
-    competitors = await _build_multi_angle_competitors(angles, signal_result)
 
     analysis = await _generate_strategic_analysis(
         idea_text, signal_result, competitors, crowd, language,
