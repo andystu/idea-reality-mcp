@@ -348,6 +348,18 @@ async def health():
     return {"status": "ok"}
 
 
+@app.get("/api/stats")
+async def get_stats():
+    """Public stats for the /check hero section."""
+    total = score_db.get_total_checks()
+    last_check = score_db.get_last_check_time()
+    return {
+        "total_ideas_scanned": total,
+        "sources_count": 5,
+        "last_updated": last_check or datetime.now(timezone.utc).isoformat(),
+    }
+
+
 @app.post("/api/extract-keywords")
 async def extract_keywords_endpoint(req: ExtractKeywordsRequest, request: Request):
     """LLM-powered keyword extraction via Claude Haiku 4.5.
