@@ -1,10 +1,11 @@
-"""Paid report generation engine — V1.0 redesign.
+"""Paid report generation engine — V2.0.
 
-4 sections, data-driven, no generic advice:
+5 sections, data-driven, no generic advice:
 1. Score Breakdown — per-source signal bars
 2. Crowd Intelligence — N similar queries, avg score (facts only)
-3. Real Competitors — top 10 with activity badges
-4. Strategic Analysis — Sonnet LLM, one cohesive analysis
+3. Multi-Angle Search — Haiku generates 3-5 search perspectives
+4. Real Competitors — top 15 from multi-angle scan, activity badges
+5. Strategic Analysis — Sonnet LLM, one cohesive analysis
 """
 
 from __future__ import annotations
@@ -157,7 +158,74 @@ def _build_crowd_intelligence(idea_text: str, idea_hash: str, score: int) -> dic
 
 
 # ---------------------------------------------------------------------------
-# Section 3: Real Competitors — activity badges
+# Section 3: Multi-Angle Search — Haiku generates search perspectives
+# ---------------------------------------------------------------------------
+
+_ANGLE_PROMPT = """Given a product idea, generate 3-5 distinct search angles.
+Each angle should search for the same concept from a DIFFERENT perspective.
+
+Example — idea: "AI code review tool"
+→ ["AI code review tool", "automated pull request review", "LLM code analysis", "developer code quality automation"]
+
+Rules:
+- Each angle is 3-6 words, suitable for GitHub/npm search
+- Angles should find DIFFERENT competitors (not the same ones with different words)
+- Output ONLY a JSON array of strings. No explanation."""
+
+
+async def _generate_search_angles(idea_text: str) -> list[str]:
+    """Use Haiku to generate 3-5 distinct search angles from one idea.
+
+    Fallback: extract query strings from signal_result evidence.
+    """
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        return [idea_text]
+
+    try:
+        import anthropic
+
+        client = anthropic.AsyncAnthropic(api_key=api_key)
+        message = await client.messages.create(
+            model="claude-haiku-4-5",
+            max_tokens=300,
+            system=_ANGLE_PROMPT,
+            messages=[{"role": "user", "content": idea_text}],
+        )
+
+        raw = message.content[0].text.strip()
+
+        # Strip markdown code fences if present
+        if raw.startswith("```"):
+            lines = raw.split("\n")
+            lines = [ln for ln in lines if not ln.strip().startswith("```")]
+            raw = "\n".join(lines).strip()
+
+        angles = json.loads(raw)
+
+        if not isinstance(angles, list) or len(angles) < 2:
+            return [idea_text]
+
+        cleaned = [str(a).strip() for a in angles if str(a).strip()]
+        return cleaned[:5] if len(cleaned) >= 2 else [idea_text]
+
+    except Exception:
+        logger.exception("[REPORT] Haiku angle generation failed")
+        return [idea_text]
+
+
+def _fallback_angles_from_evidence(signal_result: dict) -> list[str]:
+    """Extract query strings from signal_result evidence as fallback angles."""
+    angles: list[str] = []
+    for ev in signal_result.get("evidence", []):
+        q = ev.get("query", "")
+        if q and q not in angles:
+            angles.append(q)
+    return angles[:5] if angles else []
+
+
+# ---------------------------------------------------------------------------
+# Section 4: Real Competitors — activity badges
 # ---------------------------------------------------------------------------
 
 
@@ -276,8 +344,85 @@ async def _build_competitor_analysis(signal_result: dict) -> list[dict]:
     return unique[:10]
 
 
+async def _build_multi_angle_competitors(
+    angles: list[str],
+    signal_result: dict,
+) -> list[dict]:
+    """For each angle, run 1 GitHub search. Merge, dedupe, tag found_via_angles."""
+    from idea_reality_mcp.sources.github import (
+        GITHUB_API,
+        _headers,
+        _is_noise_repo,
+    )
+
+    all_repos: list[dict] = []
+    # Track which angles found each repo
+    repo_angles: dict[str, list[str]] = {}
+
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        for angle in angles:
+            try:
+                resp = await client.get(
+                    GITHUB_API,
+                    params={
+                        "q": angle,
+                        "sort": "stars",
+                        "order": "desc",
+                        "per_page": 10,
+                    },
+                    headers=_headers(),
+                )
+                resp.raise_for_status()
+                data = resp.json()
+
+                for item in data.get("items", []):
+                    name = item.get("full_name", "")
+                    if not name:
+                        continue
+                    if name not in repo_angles:
+                        repo_angles[name] = []
+                    repo_angles[name].append(angle)
+                    all_repos.append({
+                        "name": name,
+                        "url": item.get("html_url", ""),
+                        "stars": item.get("stargazers_count", 0),
+                        "description": (item.get("description") or "")[:300],
+                        "updated": item.get("updated_at", ""),
+                        "created": item.get("created_at", ""),
+                        "language": item.get("language", ""),
+                    })
+            except Exception:
+                continue
+
+    # Build relevance keywords from all angles
+    kw_set: set[str] = set()
+    for angle in angles:
+        for w in angle.lower().split():
+            if len(w) >= 4:
+                kw_set.add(w)
+    relevance_kws = list(kw_set) or None
+
+    all_repos = [r for r in all_repos if not _is_noise_repo(r, query_keywords=relevance_kws)]
+
+    # Dedupe: merge found_via_angles, sort by angle count desc then stars desc
+    seen: set[str] = set()
+    unique: list[dict] = []
+    for repo in sorted(
+        all_repos,
+        key=lambda r: (len(repo_angles.get(r["name"], [])), r["stars"]),
+        reverse=True,
+    ):
+        if repo["name"] not in seen:
+            seen.add(repo["name"])
+            repo["found_via_angles"] = repo_angles.get(repo["name"], [])
+            repo["activity"] = _activity_badge(repo.get("updated", ""))
+            unique.append(repo)
+
+    return unique[:15]
+
+
 # ---------------------------------------------------------------------------
-# Section 4: Strategic Analysis — Sonnet (paid) / Haiku (free fallback)
+# Section 5: Strategic Analysis — Sonnet (paid) / Haiku (free fallback)
 # ---------------------------------------------------------------------------
 
 _STRATEGIC_PROMPT = """You are a competitive intelligence analyst writing a paid report section.
@@ -320,6 +465,8 @@ async def _generate_strategic_analysis(
     competitors: list[dict],
     crowd: dict,
     language: str,
+    *,
+    angles: list[str] | None = None,
 ) -> str:
     """Call Sonnet for paid report strategic analysis. Falls back to template."""
     api_key = os.environ.get("ANTHROPIC_API_KEY")
@@ -329,14 +476,16 @@ async def _generate_strategic_analysis(
 
     # Build competitor summary
     comp_lines = []
-    for c in competitors[:10]:
+    for c in competitors[:15]:
         activity = c.get("activity", {})
         badge = activity.get("badge", "")
         days = activity.get("days_since_update")
         days_str = f", last updated {days}d ago" if days is not None else ""
         desc = f" — {c['description'][:100]}" if c.get("description") else ""
+        found_via = c.get("found_via_angles", [])
+        via_str = f" [found via: {', '.join(found_via)}]" if found_via else ""
         comp_lines.append(
-            f"- {badge} {c['name']} ({c.get('stars', 0)}★{days_str}){desc}"
+            f"- {badge} {c['name']} ({c.get('stars', 0)}★{days_str}){desc}{via_str}"
         )
     competitors_text = "\n".join(comp_lines) if comp_lines else "(no competitors found)"
 
@@ -358,11 +507,17 @@ async def _generate_strategic_analysis(
         else f"Database: {total_db} total queries. No similar queries found."
     )
 
+    # Search angles context
+    angles_text = ""
+    if angles and len(angles) > 1:
+        angles_text = f"\nSearch Angles Used:\n" + "\n".join(f"- {a}" for a in angles) + "\n"
+
     user_prompt = (
         f"Idea: {idea_text}\n"
         f"Reality Signal: {signal_result.get('reality_signal', 0)}/100\n"
         f"Duplicate Likelihood: {signal_result.get('duplicate_likelihood', 'unknown')}\n"
-        f"Language: {language}\n\n"
+        f"Language: {language}\n"
+        f"{angles_text}\n"
         f"Source Evidence:\n{evidence_text}\n\n"
         f"Competitors:\n{competitors_text}\n\n"
         f"Crowd Intelligence:\n{crowd_text}"
@@ -398,24 +553,43 @@ async def generate_report(
     """Generate a paid report from compute_signal() output.
 
     Returns dict with keys:
+    - search_angles: list of search perspectives used
+    - sub_scores: per-source sub-dimension scores
     - score_breakdown: per-source signal bars
     - crowd_intelligence: similar queries data
-    - competitors: top 10 with activity badges
+    - competitors: top 15 from multi-angle scan with activity badges
     - strategic_analysis: Sonnet-generated cohesive analysis (string)
+    - verified_at: ISO timestamp of report generation
     """
     idea_h = score_db.idea_hash(idea_text)
     score = signal_result.get("reality_signal", 0)
 
+    # Generate search angles (Haiku LLM, fallback to evidence queries)
+    angles = await _generate_search_angles(idea_text)
+    if len(angles) <= 1:
+        # Haiku failed or no API key — use evidence queries as fallback
+        fallback = _fallback_angles_from_evidence(signal_result)
+        if fallback:
+            angles = fallback
+
     score_breakdown = _build_score_breakdown(signal_result)
     crowd = _build_crowd_intelligence(idea_text, idea_h, score)
-    competitors = await _build_competitor_analysis(signal_result)
+    sub_scores = signal_result.get("sub_scores", {})
+
+    # Multi-angle competitor scan
+    competitors = await _build_multi_angle_competitors(angles, signal_result)
+
     analysis = await _generate_strategic_analysis(
         idea_text, signal_result, competitors, crowd, language,
+        angles=angles,
     )
 
     return {
+        "search_angles": angles,
+        "sub_scores": sub_scores,
         "score_breakdown": score_breakdown,
         "crowd_intelligence": crowd,
         "competitors": competitors,
         "strategic_analysis": analysis,
+        "verified_at": datetime.now(timezone.utc).isoformat(),
     }

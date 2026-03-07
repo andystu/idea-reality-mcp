@@ -23,7 +23,7 @@ import httpx
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -652,6 +652,15 @@ def _build_report_html(record: dict, report_id: str) -> str:
     strategic = report.get("strategic_analysis", "")
     score = record.get("score", 0)
     idea_text = record.get("idea_text", "")
+    sub_scores = report.get("sub_scores", {})
+    search_angles = report.get("search_angles", [])
+    verified_at = report.get("verified_at", record.get("created_at", ""))
+    evidence = report_data.get("evidence", report.get("evidence", []))
+    if isinstance(evidence, str):
+        try:
+            evidence = json.loads(evidence)
+        except (json.JSONDecodeError, TypeError):
+            evidence = []
 
     # Score circle color
     if score >= 70:
@@ -661,24 +670,68 @@ def _build_report_html(record: dict, report_id: str) -> str:
     else:
         score_color = "#00cc66"
 
-    # Source bars HTML
-    bars_html = ""
-    for bar in score_breakdown.get("source_bars", []):
-        src = bar.get("source", "unknown")
-        pct = bar.get("percentage", 0)
-        signals = bar.get("signals", 0)
-        color = _SOURCE_COLORS.get(src, "#666")
-        bars_html += (
-            f'<div class="bar-row">'
-            f'<span class="bar-label">{html_escape(src)}</span>'
-            f'<div class="bar-track"><div class="bar-fill" style="width:{pct}%;background:{color}"></div></div>'
-            f'<span class="bar-val">{signals}</span>'
+    # Duplicate likelihood styling
+    dup = score_breakdown.get("duplicate_likelihood", "unknown")
+    dup_colors = {"high": "#ff4444", "medium": "#ff9800", "low": "#00cc66"}
+    dup_color = dup_colors.get(dup, "#888")
+
+    # --- Section: Sub-Dimension Scores bars ---
+    _SUB_LABELS = {
+        "competition_density": "Competition Density",
+        "market_maturity": "Market Maturity",
+        "community_buzz": "Community Buzz",
+        "ecosystem_depth": "Ecosystem Depth",
+    }
+    _SUB_EXPLAIN = {
+        "competition_density": "GitHub repos found",
+        "market_maturity": "Top project star count",
+        "community_buzz": "HN + Product Hunt mentions",
+        "ecosystem_depth": "npm + PyPI packages",
+    }
+    # Compute ecosystem_depth as average of npm/pypi if available
+    eco_npm = sub_scores.get("ecosystem_depth_npm")
+    eco_pypi = sub_scores.get("ecosystem_depth_pypi")
+    eco_parts = [v for v in [eco_npm, eco_pypi] if v is not None]
+    ecosystem_depth = round(sum(eco_parts) / len(eco_parts)) if eco_parts else None
+    merged_sub = {
+        "competition_density": sub_scores.get("competition_density"),
+        "market_maturity": sub_scores.get("market_maturity"),
+        "community_buzz": sub_scores.get("community_buzz"),
+        "ecosystem_depth": ecosystem_depth,
+    }
+
+    sub_bars_html = ""
+    for key in ["competition_density", "market_maturity", "community_buzz", "ecosystem_depth"]:
+        val = merged_sub.get(key)
+        if val is None:
+            continue
+        pct = min(int(val), 100)
+        label = _SUB_LABELS[key]
+        explain = _SUB_EXPLAIN[key]
+        sub_bars_html += (
+            f'<div class="sub-row">'
+            f'<span class="sub-label">{label}</span>'
+            f'<div class="sub-track"><div class="sub-fill" style="width:{pct}%"></div></div>'
+            f'<span class="sub-val">{pct}</span>'
+            f'<span class="sub-explain">{explain}</span>'
             f'</div>'
         )
+    if not sub_bars_html:
+        sub_bars_html = '<p class="empty">Sub-dimension data not available.</p>'
 
-    # Competitors HTML
+    # --- Section: Search Angles ---
+    angles_html = ""
+    if search_angles:
+        for i, angle in enumerate(search_angles, 1):
+            angles_html += f'<li>{html_escape(angle)}</li>'
+        angles_html = f'<ol class="angles-list">{angles_html}</ol>'
+
+    # --- Section: Crowd Intelligence ---
+    crowd_msg = html_escape(crowd.get("message", "No similar queries found."))
+
+    # --- Section: Competitors (up to 15) ---
     comp_html = ""
-    for c in competitors[:10]:
+    for c in competitors[:15]:
         activity = c.get("activity", {})
         badge = activity.get("badge", "")
         label = activity.get("label", "")
@@ -690,6 +743,13 @@ def _build_report_html(record: dict, report_id: str) -> str:
         name = html_escape(c.get("name", ""))
         desc = html_escape(c.get("description", ""))
         stars_val = c.get("stars", 0)
+        found_via = c.get("found_via_angles", [])
+        via_html = ""
+        if found_via:
+            via_tags = " ".join(
+                f'<span class="angle-tag">{html_escape(a)}</span>' for a in found_via
+            )
+            via_html = f'<div class="comp-via">Found via: {via_tags}</div>'
         comp_html += (
             f'<div class="comp">'
             f'<div class="comp-header">'
@@ -699,13 +759,14 @@ def _build_report_html(record: dict, report_id: str) -> str:
             f'{lang_tag}'
             f'</div>'
             f'<p class="comp-desc">{desc}</p>'
+            f'{via_html}'
             f'<span class="comp-meta">{html_escape(label.capitalize())}{days_str}</span>'
             f'</div>'
         )
     if not comp_html:
         comp_html = '<p class="empty">No competitors found.</p>'
 
-    # Strategic analysis paragraphs
+    # --- Section: Strategic Analysis ---
     strat_html = ""
     if strategic:
         for p in strategic.split("\n\n"):
@@ -715,13 +776,65 @@ def _build_report_html(record: dict, report_id: str) -> str:
     else:
         strat_html = "<p>Strategic analysis not available.</p>"
 
-    # Crowd message
-    crowd_msg = html_escape(crowd.get("message", "No similar queries found."))
+    # --- Section: Source Evidence ---
+    evidence_html = ""
+    if isinstance(evidence, list) and evidence:
+        for ev in evidence:
+            if isinstance(ev, dict):
+                src = html_escape(ev.get("source", "unknown"))
+                desc = html_escape(ev.get("description", str(ev.get("detail", ""))))
+                evidence_html += f'<div class="ev-item"><span class="ev-src">[{src}]</span> {desc}</div>'
+            elif isinstance(ev, str):
+                evidence_html += f'<div class="ev-item">{html_escape(ev)}</div>'
+        if verified_at:
+            evidence_html += f'<div class="ev-ts">All data verified: {html_escape(verified_at)}</div>'
+    else:
+        evidence_html = '<p class="empty">No evidence data available.</p>'
 
-    # Duplicate likelihood styling
-    dup = score_breakdown.get("duplicate_likelihood", "unknown")
-    dup_colors = {"high": "#ff4444", "medium": "#ff9800", "low": "#00cc66"}
-    dup_color = dup_colors.get(dup, "#888")
+    # --- Section: AI Prompt (copyable) ---
+    # Build Markdown-formatted summary for AI agents
+    sub_lines = ""
+    for key in ["competition_density", "market_maturity", "community_buzz", "ecosystem_depth"]:
+        val = merged_sub.get(key)
+        if val is not None:
+            sub_lines += f"- {_SUB_LABELS[key]}: {val}/100 — {_SUB_EXPLAIN[key]}\n"
+
+    angles_md = ""
+    if search_angles:
+        for i, a in enumerate(search_angles, 1):
+            angles_md += f'{i}. "{a}"\n'
+
+    comp_table = "| # | Project | Stars | Language | Activity | Found Via |\n"
+    comp_table += "|---|---------|-------|----------|----------|----------|\n"
+    for i, c in enumerate(competitors[:15], 1):
+        c_name = c.get("name", "")
+        c_stars = f'{c.get("stars", 0):,}'
+        c_lang = c.get("language", "")
+        c_act = c.get("activity", {}).get("label", "")
+        c_days = c.get("activity", {}).get("days_since_update")
+        c_act_str = f"{c_act} ({c_days}d)" if c_days is not None else c_act
+        c_via = ", ".join(c.get("found_via_angles", []))
+        comp_table += f"| {i} | {c_name} | {c_stars} | {c_lang} | {c_act_str} | {c_via} |\n"
+
+    crowd_md = crowd.get("message", "No similar queries found.")
+    analysis_md = strategic if strategic else "Not available."
+
+    ai_prompt_text = (
+        f"## Verified Market Intelligence Report\n"
+        f"> Generated by Mnemox Idea Reality · {verified_at} · All data verified from live APIs\n\n"
+        f"### Idea: {idea_text}\n\n"
+        f"### Overall Score: {score}/100 — {dup} duplicate likelihood\n\n"
+        f"### Sub-Dimension Scores\n{sub_lines}\n"
+        f"### Search Angles Used\n{angles_md}\n"
+        f"### Top Competitors\n{comp_table}\n"
+        f"### Crowd Intelligence\n{crowd_md}\n\n"
+        f"### Strategic Analysis\n{analysis_md}\n\n"
+        f"---\n"
+        f"Based on this verified market data, help me create a product positioning plan "
+        f"that addresses the gaps in the competitive landscape."
+    )
+
+    timestamp_display = verified_at[:10] if verified_at and len(verified_at) >= 10 else record.get("created_at", "")
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -740,11 +853,13 @@ a:hover{{text-decoration:underline}}
 .brand{{text-align:center;margin-bottom:40px}}
 .brand h1{{font-size:24px;font-weight:700;color:#fff}}
 .brand h1 span{{color:#00cc66}}
-.brand .subtitle{{color:#888;font-size:13px;margin-top:4px}}
-.idea-text{{
+.brand .rid{{color:#666;font-size:12px;margin-top:4px}}
+.idea-card{{
   background:#111;border:1px solid #222;border-radius:8px;
-  padding:16px 20px;margin:24px 0;font-size:15px;color:#ccc;
+  padding:16px 20px;margin:24px 0;
 }}
+.idea-label{{font-size:11px;color:#666;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px}}
+.idea-text{{font-size:15px;color:#ccc}}
 .score-section{{text-align:center;margin:32px 0}}
 .score-circle{{
   width:120px;height:120px;border-radius:50%;
@@ -765,11 +880,14 @@ h2{{
   border-bottom:1px solid #1a1a1a;
 }}
 .section{{background:#111;border:1px solid #222;border-radius:8px;padding:20px;margin-bottom:20px}}
-.bar-row{{display:flex;align-items:center;gap:10px;margin:8px 0}}
-.bar-label{{width:100px;font-size:12px;color:#888;text-transform:capitalize}}
-.bar-track{{flex:1;height:8px;background:#1a1a1a;border-radius:4px;overflow:hidden}}
-.bar-fill{{height:100%;border-radius:4px}}
-.bar-val{{width:40px;font-size:12px;color:#888;text-align:right}}
+.sub-row{{display:flex;align-items:center;gap:10px;margin:10px 0}}
+.sub-label{{width:160px;font-size:13px;color:#ccc}}
+.sub-track{{flex:1;height:12px;background:#1a1a1a;border-radius:6px;overflow:hidden}}
+.sub-fill{{height:100%;border-radius:6px;background:#00cc66}}
+.sub-val{{width:30px;font-size:13px;font-weight:700;color:#fff;text-align:right}}
+.sub-explain{{font-size:11px;color:#666;min-width:120px}}
+.angles-list{{margin:0;padding-left:24px;font-size:14px;color:#ccc}}
+.angles-list li{{margin:4px 0}}
 .comp{{background:#0d0d0d;border:1px solid #1a1a1a;border-radius:8px;padding:14px 16px;margin:10px 0}}
 .comp-header{{display:flex;align-items:center;gap:8px;flex-wrap:wrap}}
 .badge{{font-size:16px}}
@@ -777,10 +895,33 @@ h2{{
 .comp-stars{{font-size:12px;color:#888}}
 .lang-tag{{font-size:11px;color:#aaa;background:#1a1a1a;padding:2px 8px;border-radius:10px}}
 .comp-desc{{font-size:13px;color:#999;margin:6px 0 4px;line-height:1.5}}
+.comp-via{{font-size:11px;color:#555;margin:4px 0}}
+.angle-tag{{
+  display:inline-block;background:#00cc6615;color:#00cc66;
+  padding:1px 8px;border-radius:10px;font-size:10px;margin:0 3px;
+  border:1px solid #00cc6633;
+}}
 .comp-meta{{font-size:11px;color:#666}}
 .strat p{{margin-bottom:16px;font-size:14px;color:#ccc}}
 .crowd-msg{{font-size:14px;color:#ccc}}
+.ev-item{{font-size:13px;color:#999;margin:6px 0;font-family:monospace}}
+.ev-src{{color:#00cc66;font-weight:600}}
+.ev-ts{{margin-top:12px;font-size:12px;color:#666;font-style:italic}}
 .empty{{color:#666;font-style:italic}}
+.ai-section{{background:#0d0d0d;border:1px solid #1a1a1a;border-radius:8px;padding:20px;margin-bottom:20px}}
+.ai-explain{{font-size:13px;color:#999;margin-bottom:12px;line-height:1.6}}
+.ai-prompt{{
+  background:#111;border:1px solid #222;border-radius:6px;
+  padding:16px;font-size:12px;color:#ccc;
+  white-space:pre-wrap;word-wrap:break-word;
+  max-height:400px;overflow-y:auto;line-height:1.5;
+}}
+.copy-btn{{
+  display:inline-block;margin-top:12px;padding:8px 20px;
+  background:#00cc66;color:#0a0a0a;border:none;border-radius:6px;
+  font-size:13px;font-weight:600;cursor:pointer;
+}}
+.copy-btn:hover{{background:#00b359}}
 .footer{{
   margin-top:48px;padding-top:20px;border-top:1px solid #1a1a1a;
   text-align:center;color:#555;font-size:11px;
@@ -791,11 +932,14 @@ h2{{
 <body>
 
 <div class="brand">
-  <h1><span>Mnemox</span> Idea Reality</h1>
-  <div class="subtitle">Pre-build reality check &mdash; Full Intelligence Report</div>
+  <h1><span>MNEMOX</span> IDEA REALITY</h1>
+  <div class="rid">Full Intelligence Report &middot; ID: {html_escape(report_id[:8])} &middot; {html_escape(timestamp_display)}</div>
 </div>
 
-<div class="idea-text">{html_escape(idea_text)}</div>
+<div class="idea-card">
+  <div class="idea-label">Idea</div>
+  <div class="idea-text">{html_escape(idea_text)}</div>
+</div>
 
 <div class="score-section">
   <div class="score-circle">
@@ -805,19 +949,19 @@ h2{{
   <div><span class="dup-badge">Duplicate likelihood: {html_escape(dup)}</span></div>
 </div>
 
-<h2>Score Breakdown</h2>
+<h2>Sub-Dimension Scores</h2>
 <div class="section">
-  <p style="margin-bottom:12px;font-size:14px">{html_escape(score_breakdown.get('summary', ''))}</p>
-  <p style="margin-bottom:16px;font-size:13px;color:#999">{html_escape(score_breakdown.get('explanation', ''))}</p>
-  {bars_html}
+  {sub_bars_html}
 </div>
+
+{"<h2>Search Angles</h2><div class='section'>" + angles_html + "</div>" if angles_html else ""}
 
 <h2>Crowd Intelligence</h2>
 <div class="section">
   <p class="crowd-msg">{crowd_msg}</p>
 </div>
 
-<h2>Real Competitors</h2>
+<h2>Real Competitors ({len(competitors[:15])})</h2>
 <div class="section">
   {comp_html}
 </div>
@@ -827,10 +971,25 @@ h2{{
   {strat_html}
 </div>
 
+<h2>Source Evidence</h2>
+<div class="section">
+  {evidence_html}
+</div>
+
+<h2>How to Use This Report with AI</h2>
+<div class="ai-section">
+  <p class="ai-explain">
+    Copy the text below and paste it to your AI coding agent (Claude, ChatGPT, Cursor, etc.)
+    to generate an action plan for your product.
+  </p>
+  <pre class="ai-prompt" id="ai-prompt">{html_escape(ai_prompt_text)}</pre>
+  <button class="copy-btn" onclick="navigator.clipboard.writeText(document.getElementById('ai-prompt').textContent).then(function(){{var b=event.target;b.textContent='Copied!';setTimeout(function(){{b.textContent='Copy to Clipboard'}},2000)}})">Copy to Clipboard</button>
+</div>
+
 <div class="footer">
-  Generated by <a href="https://idea-reality-mcp.onrender.com">Mnemox Idea Reality</a>
-  &middot; {html_escape(record.get('created_at', ''))}
-  &middot; Report ID: {html_escape(report_id[:8])}
+  <a href="https://idea-reality-mcp.onrender.com">Mnemox Idea Reality</a>
+  &middot; Report {html_escape(report_id[:8])}
+  &middot; {html_escape(timestamp_display)}
 </div>
 
 </body>
@@ -850,6 +1009,42 @@ async def report_pdf(report_id: str):
         content=html_content,
         headers={
             "Content-Disposition": f'attachment; filename="idea-reality-report-{report_id[:8]}.html"',
+        },
+    )
+
+
+@app.get("/report/{report_id}/json")
+async def report_json(report_id: str):
+    """Download report as machine-readable JSON."""
+    record = score_db.get_report(report_id)
+    if record is None:
+        raise HTTPException(status_code=404, detail="Report not found")
+
+    report_data = record.get("report_data", {})
+    if isinstance(report_data, str):
+        try:
+            report_data = json.loads(report_data)
+        except (json.JSONDecodeError, TypeError):
+            report_data = {}
+
+    report = report_data.get("report", report_data)
+
+    return JSONResponse(
+        content={
+            "report_id": report_id,
+            "idea_text": record.get("idea_text", ""),
+            "score": record.get("score", 0),
+            "sub_scores": report.get("sub_scores", {}),
+            "search_angles": report.get("search_angles", []),
+            "score_breakdown": report.get("score_breakdown", {}),
+            "crowd_intelligence": report.get("crowd_intelligence", {}),
+            "competitors": report.get("competitors", []),
+            "strategic_analysis": report.get("strategic_analysis", ""),
+            "verified_at": report.get("verified_at", record.get("created_at", "")),
+            "created_at": record.get("created_at", ""),
+        },
+        headers={
+            "Content-Disposition": f'attachment; filename="idea-reality-{report_id[:8]}.json"',
         },
     )
 

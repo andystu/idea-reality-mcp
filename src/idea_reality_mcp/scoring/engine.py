@@ -640,6 +640,9 @@ def compute_signal(
     if depth == "quick" or (npm_results is None and pypi_results is None):
         # Quick mode — original weights
         signal = int(g_repo * 0.6 + g_star * 0.2 + h_score * 0.2)
+        n_score = 0
+        p_score = 0
+        ph_val = 0
     else:
         # Deep mode
         n_score = _npm_score(npm_results.total_count) if npm_results else 0
@@ -741,6 +744,14 @@ def compute_signal(
     return {
         "reality_signal": signal,
         "duplicate_likelihood": _duplicate_likelihood(signal),
+        "sub_scores": {
+            "competition_density": g_repo,
+            "market_maturity": g_star,
+            "community_buzz": h_score,
+            "ecosystem_depth_npm": n_score if depth != "quick" else None,
+            "ecosystem_depth_pypi": p_score if depth != "quick" else None,
+            "product_launches": ph_val if depth != "quick" else None,
+        },
         "evidence": evidence,
         "top_similars": top_similars,
         "pivot_hints": _generate_pivot_hints(signal, github_results, hn_results, keywords),

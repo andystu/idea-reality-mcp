@@ -209,6 +209,38 @@
     white-space:pre-wrap;
   }
 
+  /* Sub-dimension bars */
+  .sub-dim-row{display:flex;align-items:center;gap:10px;margin:10px 0}
+  .sub-dim-label{width:160px;font-size:13px;color:#aaa}
+  .sub-dim-track{flex:1;height:12px;background:#1a1a1a;border-radius:4px;overflow:hidden}
+  .sub-dim-fill{height:100%;background:#00cc66;border-radius:4px}
+  .sub-dim-val{width:50px;font-size:13px;color:#888;text-align:right}
+
+  /* Found via angles */
+  .found-via{font-size:11px;color:#555;margin-top:2px}
+
+  /* AI prompt section */
+  .ai-section{
+    background:#111;border:1px solid #222;border-radius:8px;
+    padding:20px;margin-bottom:16px;
+  }
+  .ai-section h3{
+    font-size:15px;color:#00cc66;margin-bottom:12px;
+    font-weight:600;text-transform:uppercase;letter-spacing:.5px;
+  }
+  .ai-section pre{
+    background:#0a0a0a;border:1px solid #1a1a1a;border-radius:6px;
+    padding:16px;font-size:12px;color:#ccc;white-space:pre-wrap;
+    word-wrap:break-word;max-height:400px;overflow-y:auto;
+    font-family:'Courier New',monospace;
+  }
+  .ai-section .copy-btn{
+    margin-top:10px;background:#00cc66;color:#000;border:none;
+    padding:8px 20px;border-radius:6px;font-size:13px;font-weight:600;
+    cursor:pointer;transition:all .2s;
+  }
+  .ai-section .copy-btn:hover{background:#00e673}
+
   /* New search button */
   .new-search-btn{
     display:inline-block;margin-top:20px;
@@ -242,6 +274,18 @@
   footer a{color:#888;text-decoration:none}
   footer a:hover{color:#00cc66}
 
+  /* --- Value props --- */
+  .value-props{
+    max-width:640px;margin:12px auto 0;padding:0 24px;font-size:13px;color:#777;
+  }
+  .value-props .prop{padding:3px 0}
+  .value-props .prop-icon{margin-right:6px}
+
+  /* --- Report includes (paywall) --- */
+  .report-includes{text-align:left;margin:16px 0}
+  .include-item{font-size:13px;color:#aaa;padding:3px 0}
+  .comparison-note{margin-top:16px;font-size:12px;color:#666}
+
   @media(max-width:640px){
     .header h1{font-size:22px}
     .social-proof{gap:8px}
@@ -257,7 +301,7 @@
   <h1><span>Mnemox</span> Idea Reality</h1>
   <p style="color:#888;font-size:14px">Pre-build reality check for your next idea</p>
   <div class="social-proof">
-    <div class="badge"><strong id="ideas-count">0</strong> ideas checked</div>
+    <div class="badge"><strong id="ideas-count">0</strong> ideas scanned</div>
     <div class="badge"><strong id="stars-count">0</strong> GitHub stars</div>
     <div class="badge">30+ countries</div>
     <div class="badge" id="last-check-badge" style="display:none">Last check: <strong id="last-check-ago">—</strong></div>
@@ -273,6 +317,12 @@
     </select>
     <button class="check-btn" id="check-btn">Check Reality</button>
   </div>
+</div>
+
+<div class="value-props">
+  <div class="prop"><span class="prop-icon">&#9889;</span>Scans <strong>5 platforms</strong> simultaneously &mdash; GitHub, Hacker News, npm, PyPI, Product Hunt</div>
+  <div class="prop"><span class="prop-icon">&#128336;</span>15 seconds vs <strong>2+ hours</strong> of manual research</div>
+  <div class="prop"><span class="prop-icon">&#128274;</span>Every data point <strong>verified &amp; timestamped</strong> &mdash; feed directly to your AI agent</div>
 </div>
 
 <div id="error-msg" class="error-msg" style="display:none"></div>
@@ -310,12 +360,20 @@
 <!-- PAYWALL -->
 <div id="paywall">
   <div class="paywall-box">
-    <h2>Unlock Full Intelligence Report</h2>
+    <h2>Full Intelligence Report</h2>
     <div class="price">$9.99</div>
-    <div class="subtitle">One-time payment. Instant access. No subscription.</div>
+    <div class="subtitle">One-time &middot; Instant download &middot; Feed directly to AI</div>
+    <div class="report-includes">
+      <div class="include-item">&#10003; Multi-angle scan (3-5 search perspectives)</div>
+      <div class="include-item">&#10003; 4 sub-dimension scores with evidence chains</div>
+      <div class="include-item">&#10003; 15 verified competitors with activity status</div>
+      <div class="include-item">&#10003; AI strategic analysis by Claude Sonnet</div>
+      <div class="include-item">&#10003; Crowd intelligence &mdash; see what others searched</div>
+      <div class="include-item">&#10003; Machine-readable format &mdash; paste to your AI agent</div>
+    </div>
     <button class="unlock-btn" id="unlock-btn">Unlock Full Report</button>
-    <div class="paywall-trust">
-      Powered by real data from GitHub, Hacker News, npm, PyPI &amp; Product Hunt
+    <div class="comparison-note">
+      ChatGPT can search one platform at a time. We scan 5 in parallel, cross-reference results, and verify every data point with timestamps.
     </div>
   </div>
 </div>
@@ -335,6 +393,16 @@
     <div id="score-breakdown-content"></div>
   </div>
 
+  <div id="report-sub-scores" class="report-section" style="display:none">
+    <h3>Sub-Dimension Scores</h3>
+    <div id="sub-scores-content"></div>
+  </div>
+
+  <div id="report-angles" class="report-section" style="display:none">
+    <h3>Search Angles Used</h3>
+    <ol id="angles-content" style="padding-left:20px;font-size:14px;color:#ccc"></ol>
+  </div>
+
   <div id="report-crowd" class="report-section">
     <h3>Crowd Intelligence</h3>
     <div id="crowd-content"></div>
@@ -350,9 +418,17 @@
     <div id="analysis-content" class="analysis-text"></div>
   </div>
 
+  <div id="report-ai-prompt" class="ai-section" style="display:none">
+    <h3>Feed to AI Agent</h3>
+    <p style="font-size:13px;color:#888;margin-bottom:10px">Copy the text below and paste it to your AI coding agent (Claude, ChatGPT, Cursor, etc.) to generate an action plan:</p>
+    <pre id="ai-prompt-text"></pre>
+    <button class="copy-btn" id="copy-ai-btn">Copy to Clipboard</button>
+  </div>
+
   <div style="text-align:center;margin-top:24px">
     <a href="/static/report.html" class="new-search-btn">New Search</a>
-    <a id="download-btn" class="new-search-btn" style="display:none;background:#00cc66;color:#000;border-color:#00cc66;margin-left:8px" href="#">Download Report</a>
+    <a id="download-html-btn" class="new-search-btn" style="display:none;background:#00cc66;color:#000;border-color:#00cc66;margin-left:8px" href="#">Download Report</a>
+    <a id="download-json-btn" class="new-search-btn" style="display:none;margin-left:8px" href="#">Download JSON</a>
   </div>
 </div>
 
@@ -743,6 +819,56 @@
       sbContent.appendChild(container);
     });
 
+    // --- Sub-Dimension Scores ---
+    const subScores = report.sub_scores || {};
+    const subDims = [
+      { key: 'competition_density', label: 'Competition Density' },
+      { key: 'market_maturity', label: 'Market Maturity' },
+      { key: 'community_buzz', label: 'Community Buzz' },
+    ];
+    // ecosystem_depth = max(npm, pypi), hide if both null
+    const ecoNpm = subScores.ecosystem_depth_npm;
+    const ecoPypi = subScores.ecosystem_depth_pypi;
+    if (ecoNpm != null || ecoPypi != null) {
+      subDims.push({
+        key: '_ecosystem_depth',
+        label: 'Ecosystem Depth',
+        value: Math.max(ecoNpm || 0, ecoPypi || 0),
+      });
+    }
+    const subContent = $('#sub-scores-content');
+    subContent.innerHTML = '';
+    let hasSubScores = false;
+    subDims.forEach(dim => {
+      const val = dim.value != null ? dim.value : (subScores[dim.key] != null ? subScores[dim.key] : null);
+      if (val == null) return;
+      hasSubScores = true;
+      const row = document.createElement('div');
+      row.className = 'sub-dim-row';
+      const pct = Math.min(Math.max(val, 0), 100);
+      row.innerHTML = `
+        <div class="sub-dim-label">${esc(dim.label)}</div>
+        <div class="sub-dim-track"><div class="sub-dim-fill" style="width:${pct}%"></div></div>
+        <div class="sub-dim-val">${Math.round(val)}</div>
+      `;
+      subContent.appendChild(row);
+    });
+    if (hasSubScores) show($('#report-sub-scores'));
+
+    // --- Search Angles ---
+    const angles = report.search_angles || [];
+    if (angles.length > 0) {
+      const ol = $('#angles-content');
+      ol.innerHTML = '';
+      angles.forEach(a => {
+        const li = document.createElement('li');
+        li.style.padding = '4px 0';
+        li.textContent = a;
+        ol.appendChild(li);
+      });
+      show($('#report-angles'));
+    }
+
     // --- Crowd Intelligence ---
     const crowdContent = $('#crowd-content');
     crowdContent.innerHTML = '';
@@ -805,6 +931,7 @@
               ${activity.days_since_update != null ? ' &middot; updated ' + (activity.days_since_update === 0 ? 'today' : activity.days_since_update + 'd ago') : ''}
               ${c.language ? ' &middot; ' + esc(c.language) : ''}
             </div>
+            ${c.found_via_angles && c.found_via_angles.length ? '<div class="found-via">Found via: ' + c.found_via_angles.map(a => esc(a)).join(', ') + '</div>' : ''}
           </div>
         `;
         compContent.appendChild(div);
@@ -821,12 +948,73 @@
       analysisContent.textContent = analysis;
     }
 
-    // Download button
+    // --- AI Prompt ---
+    const aiLines = [];
+    aiLines.push('## Verified Market Intelligence Report');
+    aiLines.push('> Generated by Mnemox Idea Reality · ' + (report.verified_at || new Date().toISOString()) + ' · All data verified from live APIs');
+    aiLines.push('');
+    aiLines.push('### Idea: ' + ideaText);
+    aiLines.push('');
+    aiLines.push('### Overall Score: ' + score + '/100 — ' + (breakdown.duplicate_likelihood || 'unknown') + ' duplicate likelihood');
+    aiLines.push('');
+    if (hasSubScores) {
+      aiLines.push('### Sub-Dimension Scores');
+      subDims.forEach(dim => {
+        const val = dim.value != null ? dim.value : subScores[dim.key];
+        if (val != null) aiLines.push('- ' + dim.label + ': ' + Math.round(val) + '/100');
+      });
+      aiLines.push('');
+    }
+    if (angles.length > 0) {
+      aiLines.push('### Search Angles Used');
+      angles.forEach((a, i) => aiLines.push((i + 1) + '. "' + a + '"'));
+      aiLines.push('');
+    }
+    if (competitors.length > 0) {
+      aiLines.push('### Top Competitors');
+      aiLines.push('| # | Project | Stars | Language | Activity |');
+      aiLines.push('|---|---------|-------|----------|----------|');
+      competitors.slice(0, 10).forEach((c, i) => {
+        const act = c.activity || {};
+        aiLines.push('| ' + (i + 1) + ' | ' + (c.name || '') + ' | ' + (c.stars || 0).toLocaleString() + ' | ' + (c.language || '-') + ' | ' + (act.label || '-') + ' |');
+      });
+      aiLines.push('');
+    }
+    const crowd2 = report.crowd_intelligence || {};
+    if (crowd2.similar_count > 0) {
+      aiLines.push('### Crowd Intelligence');
+      aiLines.push(crowd2.similar_count + ' builders searched similar ideas. Average score: ' + (crowd2.avg_score || 0) + '/100.');
+      aiLines.push('');
+    }
+    const analysis2 = report.strategic_analysis || '';
+    if (analysis2) {
+      aiLines.push('### Strategic Analysis');
+      aiLines.push(analysis2);
+      aiLines.push('');
+    }
+    aiLines.push('---');
+    aiLines.push('Based on this verified market data, help me create a product positioning plan that addresses the gaps in the competitive landscape.');
+    const aiText = aiLines.join('\n');
+    $('#ai-prompt-text').textContent = aiText;
+    show($('#report-ai-prompt'));
+
+    // Copy button
+    $('#copy-ai-btn').addEventListener('click', function() {
+      navigator.clipboard.writeText(aiText).then(() => {
+        this.textContent = 'Copied!';
+        setTimeout(() => { this.textContent = 'Copy to Clipboard'; }, 2000);
+      });
+    });
+
+    // Download buttons
     const reportId = data.report_id || '';
     if (reportId) {
-      const dlBtn = $('#download-btn');
-      dlBtn.href = '/report/' + reportId + '/pdf';
-      dlBtn.style.display = 'inline-block';
+      const dlHtml = $('#download-html-btn');
+      dlHtml.href = '/report/' + reportId + '/pdf';
+      dlHtml.style.display = 'inline-block';
+      const dlJson = $('#download-json-btn');
+      dlJson.href = '/report/' + reportId + '/json';
+      dlJson.style.display = 'inline-block';
       currentReportId = reportId;
     }
 
