@@ -474,7 +474,7 @@ async def check(req: CheckRequest, request: Request):
                 depth=req.depth,
             )
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise HTTPException(status_code=500, detail="An internal error occurred. Please try again.") from exc
 
     result["meta"]["keyword_source"] = keyword_source
     result["meta"]["lang"] = req.lang
@@ -1173,7 +1173,7 @@ async def report_preview(req: ReportPreviewRequest, request: Request):
                 depth=req.depth,
             )
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise HTTPException(status_code=500, detail="An internal error occurred. Please try again.") from exc
 
     # Build blurred preview: reality_signal is visible, sections show title + first 50 chars
     preview: dict = {
@@ -1242,7 +1242,7 @@ async def create_checkout(req: CheckoutRequest):
         )
     except Exception as exc:
         logger.exception("LemonSqueezy checkout creation failed")
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+        raise HTTPException(status_code=502, detail="Payment service unavailable. Please try again.") from exc
 
     return {"checkout_url": url}
 
@@ -1265,7 +1265,7 @@ async def lemon_webhook(request: Request):
     try:
         event = lemon_utils.verify_webhook(payload, signature)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(status_code=400, detail="Invalid request.")
 
     event_name = event.get("meta", {}).get("event_name", "")
 
@@ -1279,6 +1279,12 @@ async def lemon_webhook(request: Request):
         tier = custom_data.get("tier", "single")
         buyer_email = attrs.get("user_email", "")
         order_id = str(event.get("data", {}).get("id", ""))
+
+        # Idempotency check — skip if this order was already processed
+        existing = score_db.get_report_by_stripe_session(order_id)
+        if existing:
+            logger.info("[WEBHOOK] Duplicate webhook for order %s, skipping", order_id)
+            return {"status": "already_processed"}
 
         if idea_text:
             try:
@@ -1465,9 +1471,10 @@ async def _checkout_status_logic(
             "report_id": report["report_id"],
         }
 
-    # 3. Self-healing: if frontend provided idea_text, generate on-the-fly
-    if idea_text and idea_text.strip() and idea_hash:
-        # Verify idea_hash matches idea_text (prevents abuse)
+    # 3. Self-healing: regenerate only when a checkout reference exists
+    #    (order_id/session_id proves a real checkout happened but webhook was missed).
+    #    Without lookup_id, returning a report would bypass payment entirely.
+    if idea_text and idea_text.strip() and idea_hash and lookup_id:
         computed_hash = score_db.idea_hash(idea_text.strip())
         if computed_hash == idea_hash:
             try:
