@@ -606,6 +606,54 @@ async def subscribe(req: SubscribeRequest, request: Request):
     return {"unlocked": True}
 
 
+class ClaimRequest(BaseModel):
+    email: str
+    idea_hash: str = ""
+    idea_text: str = ""
+
+
+@app.post("/api/claim-report")
+async def claim_report(req: ClaimRequest, request: Request):
+    """User claims a paid report after PayPal payment.
+
+    Stores the claim and sends Discord notification for manual fulfillment.
+    """
+    if not req.email or not req.email.strip() or "@" not in req.email:
+        raise HTTPException(status_code=422, detail="Invalid email")
+
+    client_ip = request.headers.get(
+        "x-forwarded-for", request.client.host if request.client else "unknown"
+    ).split(",")[0].strip()
+
+    # Save as subscriber for record keeping
+    try:
+        score_db.save_subscriber(req.email.strip(), req.idea_hash or "paid-claim")
+    except Exception:
+        logger.exception("Failed to save claim subscriber")
+
+    # Discord notification for manual fulfillment
+    webhook_url = (os.environ.get("DISCORD_WEBHOOK_URL") or "").strip()
+    if webhook_url:
+        try:
+            idea_short = (req.idea_text or "")[:200]
+            embed = {
+                "title": "💰 PAID REPORT CLAIM",
+                "color": 0x00FF88,
+                "fields": [
+                    {"name": "Email", "value": req.email.strip(), "inline": True},
+                    {"name": "Idea Hash", "value": req.idea_hash[:16] + "..." if req.idea_hash else "N/A", "inline": True},
+                    {"name": "IP", "value": client_ip, "inline": True},
+                    {"name": "Idea", "value": idea_short or "N/A", "inline": False},
+                ],
+            }
+            async with httpx.AsyncClient(timeout=5) as client:
+                await client.post(webhook_url, json={"embeds": [embed]})
+        except Exception:
+            logger.exception("Discord claim notification failed")
+
+    return {"ok": True, "message": "Report claim received. We'll send it within 24 hours."}
+
+
 @app.get("/api/subscribers/count")
 async def subscribers_count(key: str = ""):
     """Return total subscriber count (requires EXPORT_KEY)."""
