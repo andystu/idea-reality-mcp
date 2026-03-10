@@ -246,6 +246,25 @@ def init_db() -> None:
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_sub_email ON subscribers(email)"
     )
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS funnel_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id TEXT NOT NULL,
+            event_name TEXT NOT NULL,
+            ip_hash TEXT DEFAULT '',
+            metadata TEXT DEFAULT '{}',
+            created_at TEXT DEFAULT (datetime('now'))
+        )
+    """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_fe_session ON funnel_events(session_id)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_fe_event ON funnel_events(event_name)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_fe_created ON funnel_events(created_at)"
+    )
     conn.commit()
     _sync_after_write(conn)
     conn.close()
@@ -572,3 +591,169 @@ def search_similar_ideas(
     result = _rows_to_dicts(cur)
     conn.close()
     return result
+
+
+# ---------------------------------------------------------------------------
+# Funnel events
+# ---------------------------------------------------------------------------
+
+
+def save_funnel_event(
+    session_id: str,
+    event_name: str,
+    ip_hash: str = "",
+    metadata: str = "{}",
+) -> int:
+    """Insert a single funnel event. Returns row id."""
+    conn = _get_conn()
+    cur = conn.execute(
+        "INSERT INTO funnel_events (session_id, event_name, ip_hash, metadata) "
+        "VALUES (?, ?, ?, ?)",
+        (session_id, event_name, ip_hash, metadata),
+    )
+    conn.commit()
+    _sync_after_write(conn)
+    row_id = cur.lastrowid
+    conn.close()
+    return row_id
+
+
+def save_funnel_events_batch(
+    events: list[tuple[str, str, str, str]],
+) -> int:
+    """Insert multiple funnel events in one transaction.
+
+    Each tuple: (session_id, event_name, ip_hash, metadata).
+    Returns count inserted.
+    """
+    if not events:
+        return 0
+    conn = _get_conn()
+    count = 0
+    for session_id, event_name, ip_hash, metadata in events:
+        conn.execute(
+            "INSERT INTO funnel_events (session_id, event_name, ip_hash, metadata) "
+            "VALUES (?, ?, ?, ?)",
+            (session_id, event_name, ip_hash, metadata),
+        )
+        count += 1
+    conn.commit()
+    _sync_after_write(conn)
+    conn.close()
+    return count
+
+
+def get_funnel_stats(days: int = 7) -> dict[str, Any]:
+    """Return funnel aggregates for the last N days.
+
+    Returns unique_sessions, event counts, depth split, paypal click scores,
+    hourly distribution, device breakdown, and computed funnel rates.
+    """
+    conn = _get_conn()
+    cutoff_sql = f"datetime('now', '-{int(days)} days')"
+
+    # Unique sessions
+    sessions = 0
+    row = conn.execute(
+        f"SELECT COUNT(DISTINCT session_id) FROM funnel_events "
+        f"WHERE created_at >= {cutoff_sql}"
+    ).fetchone()
+    if row:
+        sessions = row[0] if isinstance(row, (list, tuple)) else list(row)[0]
+
+    # Event counts
+    event_counts: dict[str, int] = {}
+    cur = conn.execute(
+        f"SELECT event_name, COUNT(*) FROM funnel_events "
+        f"WHERE created_at >= {cutoff_sql} GROUP BY event_name"
+    )
+    for r in cur.fetchall():
+        vals = list(r) if not isinstance(r, (list, tuple)) else r
+        event_counts[vals[0]] = vals[1]
+
+    # Depth split from scan_complete metadata
+    deep_count = 0
+    quick_count = 0
+    cur2 = conn.execute(
+        f"SELECT metadata FROM funnel_events "
+        f"WHERE event_name = 'scan_complete' AND created_at >= {cutoff_sql}"
+    )
+    import json as _json
+    for r in cur2.fetchall():
+        val = list(r)[0] if not isinstance(r, (list, tuple)) else r[0]
+        try:
+            m = _json.loads(val) if isinstance(val, str) else {}
+            if m.get("depth") == "deep":
+                deep_count += 1
+            else:
+                quick_count += 1
+        except Exception:
+            quick_count += 1
+
+    # PayPal click scores
+    paypal_scores: list[int] = []
+    cur3 = conn.execute(
+        f"SELECT metadata FROM funnel_events "
+        f"WHERE event_name = 'paypal_click' AND created_at >= {cutoff_sql}"
+    )
+    for r in cur3.fetchall():
+        val = list(r)[0] if not isinstance(r, (list, tuple)) else r[0]
+        try:
+            m = _json.loads(val) if isinstance(val, str) else {}
+            s = m.get("score")
+            if s is not None:
+                paypal_scores.append(int(s))
+        except Exception:
+            pass
+
+    # Hourly distribution (scan_start)
+    hourly: dict[str, int] = {}
+    cur4 = conn.execute(
+        f"SELECT substr(created_at, 12, 2) AS hour, COUNT(*) FROM funnel_events "
+        f"WHERE event_name = 'scan_start' AND created_at >= {cutoff_sql} "
+        f"GROUP BY hour ORDER BY hour"
+    )
+    for r in cur4.fetchall():
+        vals = list(r) if not isinstance(r, (list, tuple)) else r
+        hourly[vals[0]] = vals[1]
+
+    # Device breakdown (page_load metadata)
+    devices: dict[str, int] = {}
+    cur5 = conn.execute(
+        f"SELECT metadata FROM funnel_events "
+        f"WHERE event_name = 'page_load' AND created_at >= {cutoff_sql}"
+    )
+    for r in cur5.fetchall():
+        val = list(r)[0] if not isinstance(r, (list, tuple)) else r[0]
+        try:
+            m = _json.loads(val) if isinstance(val, str) else {}
+            d = m.get("ua_device", "unknown")
+            devices[d] = devices.get(d, 0) + 1
+        except Exception:
+            devices["unknown"] = devices.get("unknown", 0) + 1
+
+    conn.close()
+
+    # Compute funnel rates
+    page_loads = event_counts.get("page_load", 0)
+    scans = event_counts.get("scan_start", 0)
+    paypal_clicks = event_counts.get("paypal_click", 0)
+    unlocks = event_counts.get("unlock_complete", 0)
+
+    funnel_rates = {
+        "visit_to_scan": round(scans / page_loads * 100, 1) if page_loads else 0,
+        "scan_to_paypal": round(paypal_clicks / scans * 100, 1) if scans else 0,
+        "paypal_to_unlock": round(unlocks / paypal_clicks * 100, 1) if paypal_clicks else 0,
+        "overall_conversion": round(unlocks / page_loads * 100, 2) if page_loads else 0,
+    }
+
+    return {
+        "period_days": days,
+        "unique_sessions": sessions,
+        "events": event_counts,
+        "funnel_rates": funnel_rates,
+        "depth_split": {"deep": deep_count, "quick": quick_count},
+        "paypal_click_scores": paypal_scores,
+        "hourly_distribution": hourly,
+        "device_breakdown": devices,
+    }

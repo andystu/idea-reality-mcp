@@ -155,7 +155,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
     allow_methods=["GET", "POST"],
-    allow_headers=["Content-Type"],
+    allow_headers=["Content-Type", "x-session-id"],
 )
 
 
@@ -556,9 +556,11 @@ async def check(req: CheckRequest, request: Request):
     )
 
     # Save query log (SHA256 hashed IP, no PII)
+    client_ip = request.headers.get(
+        "x-forwarded-for", request.client.host if request.client else "unknown"
+    ).split(",")[0].strip()
+    ip_hash = hashlib.sha256(client_ip.encode()).hexdigest()
     try:
-        client_ip = request.client.host if request.client else "unknown"
-        ip_hash = hashlib.sha256(client_ip.encode()).hexdigest()
         country = _extract_country(request)
         score_db.save_query_log(
             ip_hash=ip_hash,
@@ -569,6 +571,24 @@ async def check(req: CheckRequest, request: Request):
         )
     except Exception:
         logger.exception("Failed to save query log")
+
+    # Funnel event: scan_complete (server-side, guaranteed)
+    session_id = request.headers.get("x-session-id", "")
+    if session_id and 20 <= len(session_id) <= 50:
+        try:
+            score_db.save_funnel_event(
+                session_id=session_id,
+                event_name="scan_complete",
+                ip_hash=ip_hash,
+                metadata=json.dumps({
+                    "depth": req.depth,
+                    "score": result["reality_signal"],
+                    "duplicate_likelihood": result.get("duplicate_likelihood", ""),
+                    "keyword_source": keyword_source,
+                }),
+            )
+        except Exception:
+            pass  # non-fatal
 
     return result
 
@@ -629,6 +649,12 @@ async def unlock_report(req: UnlockRequest, request: Request):
         )
     except Exception:
         logger.exception("[UNLOCK] Deep scan failed")
+        _sid = request.headers.get("x-session-id", "")
+        if _sid and 20 <= len(_sid) <= 50:
+            try:
+                score_db.save_funnel_event(_sid, "unlock_fail", hashlib.sha256(client_ip.encode()).hexdigest(), json.dumps({"error": "deep_scan_failed"}))
+            except Exception:
+                pass
         raise HTTPException(status_code=500, detail="An internal error occurred. Please try again.")
 
     # 2. Generate full report (sub-dimensions, competitors, strategic analysis)
@@ -641,6 +667,12 @@ async def unlock_report(req: UnlockRequest, request: Request):
         )
     except Exception:
         logger.exception("[UNLOCK] Report generation failed")
+        _sid = request.headers.get("x-session-id", "")
+        if _sid and 20 <= len(_sid) <= 50:
+            try:
+                score_db.save_funnel_event(_sid, "unlock_fail", hashlib.sha256(client_ip.encode()).hexdigest(), json.dumps({"error": "report_gen_failed"}))
+            except Exception:
+                pass
         raise HTTPException(status_code=500, detail="An internal error occurred. Please try again.")
 
     # 3. Discord notification for audit
@@ -664,7 +696,24 @@ async def unlock_report(req: UnlockRequest, request: Request):
         except Exception:
             logger.exception("[UNLOCK] Discord notification failed")
 
-    # 4. Return combined data for frontend renderPaidReport()
+    # 4. Funnel event: unlock_complete (server-side, guaranteed)
+    session_id = request.headers.get("x-session-id", "")
+    ip_hash = hashlib.sha256(client_ip.encode()).hexdigest()
+    if session_id and 20 <= len(session_id) <= 50:
+        try:
+            score_db.save_funnel_event(
+                session_id=session_id,
+                event_name="unlock_complete",
+                ip_hash=ip_hash,
+                metadata=json.dumps({
+                    "score": signal_result.get("reality_signal", 0),
+                    "competitor_count": len(full_report.get("competitors", [])),
+                }),
+            )
+        except Exception:
+            pass
+
+    # 5. Return combined data for frontend renderPaidReport()
     idea_hash = score_db.idea_hash(idea_text)
     return {
         "report_data": {
@@ -781,6 +830,17 @@ class PageViewRequest(BaseModel):
     page: str
 
 
+class FunnelEventItem(BaseModel):
+    event_name: str
+    metadata: dict = {}
+    ts: float = 0  # client timestamp (ms since epoch)
+
+
+class FunnelEventsRequest(BaseModel):
+    session_id: str
+    events: list[FunnelEventItem]
+
+
 _view_limits: dict[str, dict] = defaultdict(lambda: {"count": 0, "reset_date": ""})
 _VIEW_DAILY_LIMIT = 200  # per IP per day — prevents DB flooding
 
@@ -808,6 +868,82 @@ async def record_page_view(req: PageViewRequest, request: Request):
     except Exception:
         logger.exception("Failed to save page view")
     return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# Funnel analytics
+# ---------------------------------------------------------------------------
+
+_ALLOWED_EVENTS = {
+    "page_load", "textarea_focus", "textarea_input", "depth_toggle",
+    "scan_start", "scan_complete", "paypal_click", "unlock_start",
+    "unlock_complete", "unlock_fail", "claim_report", "results_scroll",
+    "copy_to_ai", "reset_form",
+}
+_event_limits: dict[str, dict] = defaultdict(lambda: {"count": 0, "reset_date": ""})
+_EVENT_DAILY_LIMIT = 500  # per IP per day
+
+
+@app.post("/api/event")
+async def record_funnel_events(req: FunnelEventsRequest, request: Request):
+    """Record frontend funnel events (batched).
+
+    Body: { "session_id": "uuid", "events": [{"event_name": "...", "metadata": {...}}] }
+    """
+    # Validate session_id (UUID-like, 20-50 chars)
+    if not req.session_id or len(req.session_id) < 20 or len(req.session_id) > 50:
+        return {"ok": True}
+
+    client_ip = request.headers.get(
+        "x-forwarded-for", request.client.host if request.client else "unknown"
+    ).split(",")[0].strip()
+    ip_hash = hashlib.sha256(client_ip.encode()).hexdigest()
+
+    # Rate limit
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    entry = _event_limits[client_ip]
+    if entry["reset_date"] != today:
+        entry["count"] = 0
+        entry["reset_date"] = today
+    entry["count"] += len(req.events)
+    if entry["count"] > _EVENT_DAILY_LIMIT:
+        return {"ok": True}  # silently drop
+
+    batch: list[tuple[str, str, str, str]] = []
+    for evt in req.events[:20]:  # max 20 events per request
+        if evt.event_name not in _ALLOWED_EVENTS:
+            continue
+        meta_str = json.dumps(evt.metadata)[:1000]
+        batch.append((req.session_id, evt.event_name, ip_hash, meta_str))
+
+    if batch:
+        try:
+            score_db.save_funnel_events_batch(batch)
+        except Exception:
+            logger.exception("Failed to save funnel events")
+
+    return {"ok": True}
+
+
+@app.get("/api/funnel")
+async def funnel_dashboard(key: str = "", days: int = 7):
+    """Funnel analytics dashboard (requires EXPORT_KEY).
+
+    Returns full funnel metrics for the specified period.
+    Example: GET /api/funnel?key=EXPORT_KEY&days=7
+    """
+    export_key = (os.environ.get("EXPORT_KEY") or "").strip()
+    if not export_key or key != export_key:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    days = min(max(days, 1), 90)
+    try:
+        stats = score_db.get_funnel_stats(days)
+    except Exception:
+        logger.exception("Failed to get funnel stats")
+        raise HTTPException(status_code=500, detail="Stats unavailable")
+
+    return stats
 
 
 @app.get("/api/social-proof")
