@@ -582,6 +582,102 @@ async def get_history(idea_hash: str):
     return {"idea_hash": idea_hash, "records": records}
 
 
+class UnlockRequest(BaseModel):
+    idea_text: str
+    lang: str = "en"
+
+
+@app.post("/api/unlock-report")
+async def unlock_report(req: UnlockRequest, request: Request):
+    """Generate a full paid report (trust-based, audited via Discord).
+
+    Called after user completes PayPal payment. Returns the full report
+    data for inline rendering. Discord notification tracks all unlocks.
+    """
+    if not req.idea_text or not req.idea_text.strip():
+        raise HTTPException(status_code=422, detail="idea_text cannot be empty")
+
+    idea_text = req.idea_text.strip()
+    client_ip = request.headers.get(
+        "x-forwarded-for", request.client.host if request.client else "unknown"
+    ).split(",")[0].strip()
+
+    # 1. Run deep scan (same as /api/check with depth=deep)
+    keywords = await _extract_keywords_via_haiku(idea_text)
+    if keywords is None:
+        keywords = extract_keywords(idea_text)
+
+    try:
+        github_results, hn_results, npm_results, pypi_results, ph_results = (
+            await asyncio.gather(
+                search_github_repos(keywords),
+                search_hn(keywords),
+                search_npm(keywords),
+                search_pypi(keywords),
+                search_producthunt(keywords),
+            )
+        )
+        signal_result = compute_signal(
+            idea_text=idea_text,
+            keywords=keywords,
+            github_results=github_results,
+            hn_results=hn_results,
+            depth="deep",
+            npm_results=npm_results,
+            pypi_results=pypi_results,
+            ph_results=ph_results,
+        )
+    except Exception:
+        logger.exception("[UNLOCK] Deep scan failed")
+        raise HTTPException(status_code=500, detail="An internal error occurred. Please try again.")
+
+    # 2. Generate full report (sub-dimensions, competitors, strategic analysis)
+    try:
+        full_report = await report_mod.generate_report(
+            idea_text=idea_text,
+            signal_result=signal_result,
+            language=req.lang,
+            tier="single",
+        )
+    except Exception:
+        logger.exception("[UNLOCK] Report generation failed")
+        raise HTTPException(status_code=500, detail="An internal error occurred. Please try again.")
+
+    # 3. Discord notification for audit
+    webhook_url = (os.environ.get("DISCORD_WEBHOOK_URL") or "").strip()
+    if webhook_url:
+        try:
+            idea_short = idea_text[:150]
+            score = signal_result.get("reality_signal", 0)
+            embed = {
+                "title": f"💰 REPORT UNLOCKED — Signal {score}/100",
+                "description": idea_short,
+                "color": 0x00FF88,
+                "fields": [
+                    {"name": "IP", "value": client_ip, "inline": True},
+                    {"name": "Competitors", "value": str(len(full_report.get("competitors", []))), "inline": True},
+                    {"name": "Lang", "value": req.lang, "inline": True},
+                ],
+            }
+            async with httpx.AsyncClient(timeout=5) as hc:
+                await hc.post(webhook_url, json={"embeds": [embed]})
+        except Exception:
+            logger.exception("[UNLOCK] Discord notification failed")
+
+    # 4. Return combined data for frontend renderPaidReport()
+    idea_hash = score_db.idea_hash(idea_text)
+    return {
+        "report_data": {
+            "reality_signal": signal_result.get("reality_signal", 0),
+            "duplicate_likelihood": signal_result.get("duplicate_likelihood", "unknown"),
+            "report": full_report,
+        },
+        "idea_hash": idea_hash,
+        "idea_text": idea_text,
+        "score": signal_result.get("reality_signal", 0),
+    }
+
+
 @app.post("/api/subscribe")
 async def subscribe(req: SubscribeRequest, request: Request):
     """Save email for pivot hints unlock. No email validation (MVP).
