@@ -885,11 +885,27 @@ _EVENT_DAILY_LIMIT = 500  # per IP per day
 
 
 @app.post("/api/event")
-async def record_funnel_events(req: FunnelEventsRequest, request: Request):
+async def record_funnel_events(request: Request):
     """Record frontend funnel events (batched).
 
     Body: { "session_id": "uuid", "events": [{"event_name": "...", "metadata": {...}}] }
+    Accepts both application/json and text/plain (sendBeacon compat).
     """
+    # Parse body — handle text/plain from sendBeacon
+    try:
+        body = await request.json()
+    except Exception:
+        try:
+            raw = await request.body()
+            body = json.loads(raw)
+        except Exception:
+            return {"ok": True}
+
+    try:
+        req = FunnelEventsRequest(**body)
+    except Exception:
+        return {"ok": True}
+
     # Validate session_id (UUID-like, 20-50 chars)
     if not req.session_id or len(req.session_id) < 20 or len(req.session_id) > 50:
         return {"ok": True}
