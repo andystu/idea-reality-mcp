@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 
 import httpx
 
@@ -21,6 +22,7 @@ class ProductHuntResults:
     total_count: int = 0
     top_products: list[dict] = field(default_factory=list)
     evidence: list[dict] = field(default_factory=list)
+    recent_launch_ratio: float = 0.0
     skipped: bool = False
 
 
@@ -126,8 +128,26 @@ async def search_producthunt(keywords: list[str]) -> ProductHuntResults:
             seen[name] = prod
     unique = sorted(seen.values(), key=lambda p: p["votes"], reverse=True)
 
+    # Calculate recent_launch_ratio: products launched in last 6 months / total
+    recent_launch_ratio = 0.0
+    if unique:
+        six_months_ago = datetime.now(timezone.utc) - timedelta(days=182)
+        recent_count = 0
+        for prod in unique:
+            created = prod.get("created_at", "")
+            if not created:
+                continue
+            try:
+                dt = datetime.fromisoformat(created.replace("Z", "+00:00"))
+                if dt >= six_months_ago:
+                    recent_count += 1
+            except (ValueError, TypeError):
+                continue
+        recent_launch_ratio = recent_count / len(unique)
+
     return ProductHuntResults(
         total_count=max_total_count,
         top_products=unique[:5],
+        recent_launch_ratio=recent_launch_ratio,
         evidence=evidence,
     )

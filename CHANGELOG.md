@@ -4,6 +4,21 @@ English | [繁體中文](CHANGELOG.zh-TW.md)
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.0] - 2026-03-12
+
+### Added
+- **Temporal signals** — GitHub recency ratio, HN trend detection, Product Hunt launch timing
+- **Continuous scoring function** — replaces threshold-based scoring with log-curve `min(100, k * ln(1 + count))`
+- **`market_momentum` sub-score** — weighted average of temporal ratios across sources (0–100)
+- **Trend indicator** — `accelerating` / `stable` / `declining` based on market momentum
+
+### Changed
+- **Score formula v0.5** — temporal boost applied (±10 pts from momentum); v0.5 scores are NOT comparable to v0.4
+- Sub-score cap raised from 90 → 100
+
+### Fixed
+- Funnel event tracking `sendBeacon` Content-Type bug (was sending wrong MIME type)
+
 ## [0.4.0] - 2026-03-01
 
 ### Added

@@ -260,36 +260,36 @@ class TestGitHubRepoScore:
         assert _github_repo_score(0) == 0
 
     def test_low(self):
-        assert _github_repo_score(5) == 20
+        assert _github_repo_score(5) == 25
 
     def test_medium(self):
-        assert _github_repo_score(30) == 40
+        assert _github_repo_score(30) == 47
 
     def test_high(self):
-        assert _github_repo_score(100) == 60
+        assert _github_repo_score(100) == 63
 
     def test_very_high(self):
-        assert _github_repo_score(300) == 75
+        assert _github_repo_score(300) == 78
 
     def test_max(self):
-        assert _github_repo_score(1000) == 90
+        assert _github_repo_score(1000) == 95
 
 
 class TestGitHubStarScore:
     def test_zero(self):
-        assert _github_star_score(5) == 0
+        assert _github_star_score(5) == 18
 
     def test_low(self):
-        assert _github_star_score(50) == 30
+        assert _github_star_score(50) == 41
 
     def test_medium(self):
-        assert _github_star_score(300) == 50
+        assert _github_star_score(300) == 59
 
     def test_high(self):
-        assert _github_star_score(800) == 70
+        assert _github_star_score(800) == 69
 
     def test_max(self):
-        assert _github_star_score(5000) == 90
+        assert _github_star_score(5000) == 88
 
 
 class TestHNScore:
@@ -297,16 +297,16 @@ class TestHNScore:
         assert _hn_score(0) == 0
 
     def test_low(self):
-        assert _hn_score(3) == 25
+        assert _hn_score(3) == 29
 
     def test_medium(self):
-        assert _hn_score(10) == 50
+        assert _hn_score(10) == 49
 
     def test_high(self):
-        assert _hn_score(25) == 70
+        assert _hn_score(25) == 67
 
     def test_max(self):
-        assert _hn_score(50) == 90
+        assert _hn_score(50) == 81
 
 
 class TestNpmScore:
@@ -314,16 +314,16 @@ class TestNpmScore:
         assert _npm_score(0) == 0
 
     def test_low(self):
-        assert _npm_score(3) == 15
+        assert _npm_score(3) == 21
 
     def test_medium(self):
-        assert _npm_score(50) == 55
+        assert _npm_score(50) == 60
 
     def test_high(self):
-        assert _npm_score(200) == 75
+        assert _npm_score(200) == 81
 
     def test_max(self):
-        assert _npm_score(1000) == 90
+        assert _npm_score(1000) == 100
 
 
 class TestPyPIScore:
@@ -331,16 +331,16 @@ class TestPyPIScore:
         assert _pypi_score(0) == 0
 
     def test_low(self):
-        assert _pypi_score(3) == 15
+        assert _pypi_score(3) == 21
 
     def test_medium(self):
-        assert _pypi_score(50) == 55
+        assert _pypi_score(50) == 60
 
     def test_high(self):
-        assert _pypi_score(200) == 75
+        assert _pypi_score(200) == 81
 
     def test_max(self):
-        assert _pypi_score(1000) == 90
+        assert _pypi_score(1000) == 100
 
 
 class TestPHScore:
@@ -348,16 +348,16 @@ class TestPHScore:
         assert _ph_score(0) == 0
 
     def test_low(self):
-        assert _ph_score(2) == 20
+        assert _ph_score(2) == 23
 
     def test_medium(self):
-        assert _ph_score(20) == 60
+        assert _ph_score(20) == 63
 
     def test_high(self):
-        assert _ph_score(50) == 80
+        assert _ph_score(50) == 81
 
     def test_max(self):
-        assert _ph_score(200) == 90
+        assert _ph_score(200) == 100
 
 
 class TestDuplicateLikelihood:
@@ -382,7 +382,9 @@ class TestDuplicateLikelihood:
 # ===========================================================================
 
 
-def _make_github(count: int = 0, stars: int = 0) -> GitHubResults:
+def _make_github(
+    count: int = 0, stars: int = 0, recent_ratio: float = 0.5,
+) -> GitHubResults:
     repos = []
     if count > 0:
         repos = [{
@@ -392,10 +394,15 @@ def _make_github(count: int = 0, stars: int = 0) -> GitHubResults:
             "updated": "2025-01-01T00:00:00Z",
             "description": "A project",
         }]
-    return GitHubResults(total_repo_count=count, max_stars=stars, top_repos=repos)
+    return GitHubResults(
+        total_repo_count=count, max_stars=stars, top_repos=repos,
+        recent_ratio=recent_ratio,
+    )
 
 
-def _make_hn(mentions: int = 0) -> HNResults:
+def _make_hn(
+    mentions: int = 0, recent_mention_ratio: float | None = None,
+) -> HNResults:
     evidence = []
     if mentions > 0:
         evidence = [{
@@ -405,7 +412,10 @@ def _make_hn(mentions: int = 0) -> HNResults:
             "count": mentions,
             "detail": f"{mentions} mentions",
         }]
-    return HNResults(total_mentions=mentions, evidence=evidence)
+    return HNResults(
+        total_mentions=mentions, evidence=evidence,
+        recent_mention_ratio=recent_mention_ratio,
+    )
 
 
 class TestComputeSignalQuick:
@@ -425,10 +435,14 @@ class TestComputeSignalQuick:
         assert isinstance(result["top_similars"], list)
         assert isinstance(result["pivot_hints"], list)
         assert len(result["pivot_hints"]) == 3
-        assert result["meta"]["version"] == "0.4.0"
+        assert result["meta"]["version"] == "0.5.0"
         assert result["meta"]["depth"] == "quick"
         assert result["meta"]["sources_used"] == ["github", "hackernews"]
         assert "checked_at" in result["meta"]
+        # Temporal fields
+        assert "market_momentum" in result["sub_scores"]
+        assert 0 <= result["sub_scores"]["market_momentum"] <= 100
+        assert result["trend"] in ("accelerating", "declining", "stable")
 
     def test_zero_signal(self):
         result = compute_signal(
@@ -449,7 +463,7 @@ class TestComputeSignalQuick:
             hn_results=_make_hn(100),
             depth="quick",
         )
-        assert result["reality_signal"] == 90
+        assert result["reality_signal"] == 96
         assert result["duplicate_likelihood"] == "high"
 
 
@@ -532,3 +546,150 @@ class TestComputeSignalDeep:
         names = [s["name"] for s in result["top_similars"]]
         assert any(n.startswith("npm:") for n in names)
         assert any(n.startswith("pypi:") for n in names)
+
+
+# ===========================================================================
+# Temporal boost tests
+# ===========================================================================
+
+
+class TestTemporalBoost:
+    def test_accelerating_trend(self):
+        """High recent_ratio → accelerating trend, positive boost."""
+        result = compute_signal(
+            idea_text="test",
+            keywords=["test"],
+            github_results=_make_github(100, 500, recent_ratio=0.8),
+            hn_results=_make_hn(10, recent_mention_ratio=0.9),
+            depth="quick",
+        )
+        assert result["trend"] == "accelerating"
+        assert result["sub_scores"]["market_momentum"] == 85  # (0.8+0.9)/2=0.85
+
+    def test_declining_trend(self):
+        """Low recent_ratio → declining trend, negative boost."""
+        result = compute_signal(
+            idea_text="test",
+            keywords=["test"],
+            github_results=_make_github(100, 500, recent_ratio=0.1),
+            hn_results=_make_hn(10, recent_mention_ratio=0.1),
+            depth="quick",
+        )
+        assert result["trend"] == "declining"
+        assert result["sub_scores"]["market_momentum"] == 10
+
+    def test_stable_trend(self):
+        """Mid-range ratios → stable trend."""
+        result = compute_signal(
+            idea_text="test",
+            keywords=["test"],
+            github_results=_make_github(100, 500, recent_ratio=0.5),
+            hn_results=_make_hn(10, recent_mention_ratio=0.4),
+            depth="quick",
+        )
+        assert result["trend"] == "stable"
+        assert result["sub_scores"]["market_momentum"] == 45
+
+    def test_boost_increases_signal(self):
+        """High momentum should increase signal vs neutral."""
+        neutral = compute_signal(
+            idea_text="test",
+            keywords=["test"],
+            github_results=_make_github(50, 200, recent_ratio=0.5),
+            hn_results=_make_hn(5),
+            depth="quick",
+        )
+        boosted = compute_signal(
+            idea_text="test",
+            keywords=["test"],
+            github_results=_make_github(50, 200, recent_ratio=1.0),
+            hn_results=_make_hn(5, recent_mention_ratio=1.0),
+            depth="quick",
+        )
+        assert boosted["reality_signal"] > neutral["reality_signal"]
+
+    def test_boost_decreases_signal(self):
+        """Low momentum should decrease signal vs neutral."""
+        neutral = compute_signal(
+            idea_text="test",
+            keywords=["test"],
+            github_results=_make_github(50, 200, recent_ratio=0.5),
+            hn_results=_make_hn(5),
+            depth="quick",
+        )
+        dampened = compute_signal(
+            idea_text="test",
+            keywords=["test"],
+            github_results=_make_github(50, 200, recent_ratio=0.0),
+            hn_results=_make_hn(5, recent_mention_ratio=0.0),
+            depth="quick",
+        )
+        assert dampened["reality_signal"] < neutral["reality_signal"]
+
+    def test_no_temporal_data_neutral(self):
+        """No sources with data → momentum 0.5, no boost."""
+        result = compute_signal(
+            idea_text="xyz",
+            keywords=["xyz"],
+            github_results=_make_github(),  # count=0, skipped
+            hn_results=_make_hn(),  # no recent_mention_ratio
+            depth="quick",
+        )
+        assert result["sub_scores"]["market_momentum"] == 50
+        assert result["trend"] == "stable"
+
+    def test_temporal_evidence_present(self):
+        """Temporal evidence entries added when data available."""
+        result = compute_signal(
+            idea_text="test",
+            keywords=["test"],
+            github_results=_make_github(100, 500, recent_ratio=0.7),
+            hn_results=_make_hn(10, recent_mention_ratio=0.6),
+            depth="quick",
+        )
+        types = [e["type"] for e in result["evidence"]]
+        assert "recent_ratio" in types
+        assert "recent_mention_ratio" in types
+
+    def test_deep_mode_ph_temporal(self):
+        """PH recent_launch_ratio included in deep mode."""
+        result = compute_signal(
+            idea_text="test",
+            keywords=["test"],
+            github_results=_make_github(100, 500, recent_ratio=0.5),
+            hn_results=_make_hn(10),
+            depth="deep",
+            npm_results=NpmResults(total_count=10, top_packages=[], evidence=[]),
+            pypi_results=PyPIResults(total_count=5, top_packages=[], evidence=[]),
+            ph_results=ProductHuntResults(
+                total_count=8, top_products=[], evidence=[],
+                recent_launch_ratio=0.9, skipped=False,
+            ),
+        )
+        # momentum = (0.5 + 0.9) / 2 = 0.7 (HN has no ratio)
+        assert result["sub_scores"]["market_momentum"] == 70
+        assert result["trend"] == "accelerating"
+        types = [e["type"] for e in result["evidence"]]
+        assert "recent_launch_ratio" in types
+
+    def test_boost_clamped_at_zero(self):
+        """Signal can't go below 0 with negative boost."""
+        result = compute_signal(
+            idea_text="xyz",
+            keywords=["xyz"],
+            github_results=_make_github(1, 0, recent_ratio=0.0),
+            hn_results=_make_hn(0, recent_mention_ratio=0.0),
+            depth="quick",
+        )
+        assert result["reality_signal"] >= 0
+
+    def test_boost_clamped_at_100(self):
+        """Signal can't exceed 100 with positive boost."""
+        result = compute_signal(
+            idea_text="test",
+            keywords=["test"],
+            github_results=_make_github(1000, 50000, recent_ratio=1.0),
+            hn_results=_make_hn(100, recent_mention_ratio=1.0),
+            depth="quick",
+        )
+        assert result["reality_signal"] <= 100

@@ -153,10 +153,14 @@ class TestSearchGitHubReposDeduplication:
         response_1 = {"total_count": 10, "items": [shared_repo, unique_repo_a]}
         response_2 = {"total_count": 8, "items": [shared_repo, unique_repo_b]}
 
+        recent_response = {"total_count": 3, "items": []}
+
         mock_client = AsyncMock(spec=httpx.AsyncClient)
         mock_client.get.side_effect = [
             _mock_response(response_1),
+            _mock_response(recent_response),
             _mock_response(response_2),
+            _mock_response(recent_response),
         ]
         mock_client.__aenter__ = AsyncMock(return_value=mock_client)
         mock_client.__aexit__ = AsyncMock(return_value=False)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 from datetime import datetime, timezone
 from typing import Literal
@@ -387,90 +388,50 @@ def extract_keywords(idea_text: str) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# Source-specific score functions
+# Source-specific score functions — log-curve continuous scoring
+# score = min(100, k * ln(1 + count))
+# k calibrated per source via least-squares on target calibration points.
 # ---------------------------------------------------------------------------
 
-def _github_repo_score(count: int) -> int:
-    if count == 0:
+_K_GITHUB_REPO = 95 / math.log(1001)   # ~13.75  | 1→10, 50→54, 200→73, 1000→95
+_K_GITHUB_STAR = 95 / math.log(10001)   # ~10.31  | 10→25, 500→64, 1000→71, 10000→95
+_K_HN = 95 / math.log(101)             # ~20.58  | 1→14, 15→57, 30→71, 100→95
+_K_NPM_PYPI = 95 / math.log(501)       # ~15.28  | 1→11, 20→47, 100→71, 500→95
+_K_PH = 95 / math.log(101)             # ~20.58  | 1→14, 10→49, 30→71, 100→95
+
+
+def _log_score(count: int, k: float) -> int:
+    """Continuous log-curve scoring: min(100, round(k * ln(1 + count)))."""
+    if count <= 0:
         return 0
-    if count <= 10:
-        return 20
-    if count <= 50:
-        return 40
-    if count <= 200:
-        return 60
-    if count <= 500:
-        return 75
-    return 90
+    return min(100, round(k * math.log(1 + count)))
+
+
+def _github_repo_score(count: int) -> int:
+    return _log_score(count, _K_GITHUB_REPO)
 
 
 def _github_star_score(max_stars: int) -> int:
-    if max_stars < 10:
-        return 0
-    if max_stars <= 100:
-        return 30
-    if max_stars <= 500:
-        return 50
-    if max_stars <= 1000:
-        return 70
-    return 90
+    return _log_score(max_stars, _K_GITHUB_STAR)
 
 
 def _hn_score(mentions: int) -> int:
-    if mentions == 0:
-        return 0
-    if mentions <= 5:
-        return 25
-    if mentions <= 15:
-        return 50
-    if mentions <= 30:
-        return 70
-    return 90
+    return _log_score(mentions, _K_HN)
 
 
 def _npm_score(count: int) -> int:
     """Score npm package count."""
-    if count == 0:
-        return 0
-    if count <= 5:
-        return 15
-    if count <= 20:
-        return 35
-    if count <= 100:
-        return 55
-    if count <= 500:
-        return 75
-    return 90
+    return _log_score(count, _K_NPM_PYPI)
 
 
 def _pypi_score(count: int) -> int:
     """Score PyPI package count."""
-    if count == 0:
-        return 0
-    if count <= 5:
-        return 15
-    if count <= 20:
-        return 35
-    if count <= 100:
-        return 55
-    if count <= 500:
-        return 75
-    return 90
+    return _log_score(count, _K_NPM_PYPI)
 
 
 def _ph_score(count: int) -> int:
     """Score Product Hunt product count."""
-    if count == 0:
-        return 0
-    if count <= 3:
-        return 20
-    if count <= 10:
-        return 40
-    if count <= 30:
-        return 60
-    if count <= 100:
-        return 80
-    return 90
+    return _log_score(count, _K_PH)
 
 
 def _filter_relevant_similars(
@@ -679,7 +640,31 @@ def compute_signal(
             + ph_val * weights.get("ph", 0)
         )
 
+    # --- Temporal boost — market momentum from recent activity ratios ---
+    temporal_ratios: list[float] = []
+    if github_results.total_repo_count > 0:
+        temporal_ratios.append(github_results.recent_ratio)
+    if hn_results.recent_mention_ratio is not None:
+        temporal_ratios.append(hn_results.recent_mention_ratio)
+    if ph_results is not None and not ph_results.skipped and ph_results.total_count > 0:
+        temporal_ratios.append(ph_results.recent_launch_ratio)
+
+    if temporal_ratios:
+        market_momentum = sum(temporal_ratios) / len(temporal_ratios)
+    else:
+        market_momentum = 0.5  # neutral when no temporal data
+
+    temporal_boost = (market_momentum - 0.5) * 20  # range: -10 to +10
+    signal = int(signal + temporal_boost)
     signal = max(0, min(100, signal))
+
+    # Trend classification
+    if market_momentum > 0.6:
+        trend = "accelerating"
+    elif market_momentum < 0.3:
+        trend = "declining"
+    else:
+        trend = "stable"
 
     # Build evidence
     evidence = [
@@ -707,6 +692,32 @@ def compute_signal(
         evidence.extend(pypi_results.evidence)
     if ph_results:
         evidence.extend(ph_results.evidence)
+
+    # Temporal evidence
+    if github_results.total_repo_count > 0:
+        evidence.append({
+            "source": "github",
+            "type": "recent_ratio",
+            "query": keywords[0],
+            "count": github_results.recent_created_count,
+            "detail": f"{github_results.recent_ratio:.0%} of repos created in last 6 months",
+        })
+    if hn_results.recent_mention_ratio is not None:
+        evidence.append({
+            "source": "hackernews",
+            "type": "recent_mention_ratio",
+            "query": keywords[0],
+            "count": round(hn_results.recent_mention_ratio * 100),
+            "detail": f"{hn_results.recent_mention_ratio:.0%} of mentions in last 3 months",
+        })
+    if ph_results is not None and not ph_results.skipped and ph_results.total_count > 0:
+        evidence.append({
+            "source": "producthunt",
+            "type": "recent_launch_ratio",
+            "query": keywords[0],
+            "count": round(ph_results.recent_launch_ratio * 100),
+            "detail": f"{ph_results.recent_launch_ratio:.0%} of launches in last 6 months",
+        })
 
     # Add queried_at timestamp to all evidence items for credibility
     _now = datetime.now(timezone.utc).isoformat()
@@ -756,7 +767,9 @@ def compute_signal(
             "ecosystem_depth_npm": n_score if depth != "quick" else None,
             "ecosystem_depth_pypi": p_score if depth != "quick" else None,
             "product_launches": ph_val if depth != "quick" else None,
+            "market_momentum": round(market_momentum * 100),
         },
+        "trend": trend,
         "evidence": evidence,
         "top_similars": top_similars,
         "pivot_hints": _generate_pivot_hints(signal, github_results, hn_results, keywords),
@@ -764,6 +777,6 @@ def compute_signal(
             "checked_at": datetime.now(timezone.utc).isoformat(),
             "sources_used": sources_used,
             "depth": depth,
-            "version": "0.4.0",
+            "version": "0.5.0",
         },
     }

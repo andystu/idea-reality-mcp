@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 
 import httpx
 
@@ -88,6 +89,9 @@ class GitHubResults:
     total_repo_count: int
     max_stars: int
     top_repos: list[dict]
+    recent_created_count: int = 0
+    recent_ratio: float = 0.0
+    recently_updated_ratio: float = 0.0
 
 
 def _headers() -> dict[str, str]:
@@ -110,6 +114,10 @@ async def search_github_repos(keywords: list[str]) -> GitHubResults:
     max_total_count = 0
     max_stars = 0
     all_repos: list[dict] = []
+    max_recent_created = 0
+
+    six_months_ago = datetime.now(timezone.utc) - timedelta(days=180)
+    created_since = six_months_ago.strftime("%Y-%m-%d")
 
     # Track how many queries each repo matched (relevance signal)
     repo_query_hits: dict[str, int] = {}
@@ -146,6 +154,21 @@ async def search_github_repos(keywords: list[str]) -> GitHubResults:
             except httpx.HTTPError:
                 continue
 
+            # Second query: recently created repos for this keyword
+            try:
+                recent_q = f"{query} created:>{created_since}"
+                resp = await client.get(
+                    GITHUB_API,
+                    params={"q": recent_q, "sort": "stars", "order": "desc", "per_page": 1},
+                    headers=_headers(),
+                )
+                resp.raise_for_status()
+                recent_count = resp.json().get("total_count", 0)
+                if recent_count > max_recent_created:
+                    max_recent_created = recent_count
+            except httpx.HTTPError:
+                continue
+
     # Filter noise repos before ranking.
     # Build keyword list from query strings for relevance check.
     kw_set: set[str] = set()
@@ -169,8 +192,33 @@ async def search_github_repos(keywords: list[str]) -> GitHubResults:
             seen.add(repo["name"])
             unique_repos.append(repo)
 
+    top_5 = unique_repos[:5]
+
+    # recently_updated_ratio: fraction of top repos updated within 6 months
+    recently_updated = 0
+    for repo in top_5:
+        updated_str = repo.get("updated", "")
+        if updated_str:
+            try:
+                updated_dt = datetime.fromisoformat(updated_str.replace("Z", "+00:00"))
+                if updated_dt >= six_months_ago:
+                    recently_updated += 1
+            except (ValueError, TypeError):
+                pass
+    recently_updated_ratio = recently_updated / len(top_5) if top_5 else 0.0
+
+    # recent_ratio: recent_created / total (capped at 1.0)
+    recent_ratio = (
+        min(max_recent_created / max_total_count, 1.0)
+        if max_total_count > 0
+        else 0.0
+    )
+
     return GitHubResults(
         total_repo_count=max_total_count,
         max_stars=max_stars,
-        top_repos=unique_repos[:5],
+        top_repos=top_5,
+        recent_created_count=max_recent_created,
+        recent_ratio=recent_ratio,
+        recently_updated_ratio=recently_updated_ratio,
     )
