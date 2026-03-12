@@ -294,6 +294,9 @@ jobs:
           idea: ${{ github.event.issue.title }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 ```
+## Star History
+
+[![Star History Chart](https://api.star-history.com/image?repos=mnemox-ai/idea-reality-mcp&type=date&legend=top-left)](https://www.star-history.com/?repos=mnemox-ai%2Fidea-reality-mcp&type=date&legend=top-left)
 
 ## Roadmap
 
