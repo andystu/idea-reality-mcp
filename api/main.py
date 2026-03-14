@@ -1819,8 +1819,8 @@ async def create_paypal_order(req: PayPalOrderRequest, request: Request):
             cancel_url=cancel_url,
         )
     except Exception as exc:
-        logger.exception("PayPal order creation failed")
-        raise HTTPException(status_code=502, detail="Payment service unavailable.") from exc
+        logger.exception("PayPal order creation failed: %s", exc)
+        raise HTTPException(status_code=502, detail=f"PayPal error: {exc}") from exc
 
     return result
 
