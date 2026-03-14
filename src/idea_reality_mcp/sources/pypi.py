@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 import httpx
 
 PYPI_SEARCH_URL = "https://pypi.org/search/"
+_MAX_HTML_BYTES = 512_000  # 500 KB — skip pages larger than this
 
 
 @dataclass
@@ -55,6 +56,15 @@ async def search_pypi(keywords: list[str]) -> PyPIResults:
                     params={"q": query},
                 )
                 resp.raise_for_status()
+                if len(resp.content) > _MAX_HTML_BYTES:
+                    evidence.append({
+                        "source": "pypi",
+                        "type": "skipped",
+                        "query": query,
+                        "count": 0,
+                        "detail": f"Response too large for '{query}', skipped",
+                    })
+                    continue
                 html = resp.text
 
                 # Extract total result count

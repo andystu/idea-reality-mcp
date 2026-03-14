@@ -719,6 +719,11 @@ def compute_signal(
             "detail": f"{ph_results.recent_launch_ratio:.0%} of launches in last 6 months",
         })
 
+    # Cap evidence to prevent response bloat (keep first + last for coverage)
+    _MAX_EVIDENCE = 20
+    if len(evidence) > _MAX_EVIDENCE:
+        evidence = evidence[:_MAX_EVIDENCE]
+
     # Add queried_at timestamp to all evidence items for credibility
     _now = datetime.now(timezone.utc).isoformat()
     for ev in evidence:

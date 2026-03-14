@@ -192,12 +192,20 @@ class CheckoutRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 DAILY_LIMIT = 50
+_MAX_RATE_LIMIT_ENTRIES = 10_000
 _rate_limits: dict[str, dict] = defaultdict(lambda: {"count": 0, "reset_date": ""})
 
 
 def _check_rate_limit(client_ip: str) -> bool:
     """Return *True* if the request is within the daily limit."""
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    # Evict stale entries to prevent unbounded memory growth
+    if len(_rate_limits) > _MAX_RATE_LIMIT_ENTRIES:
+        stale = [ip for ip, v in _rate_limits.items() if v["reset_date"] != today]
+        for ip in stale:
+            del _rate_limits[ip]
+
     entry = _rate_limits[client_ip]
     if entry["reset_date"] != today:
         entry["count"] = 0
