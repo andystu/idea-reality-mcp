@@ -43,6 +43,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 import db as score_db
 import report as report_mod
 import lemon_utils
+import paypal_utils
 
 logger = logging.getLogger(__name__)
 
@@ -1772,6 +1773,126 @@ async def lemon_webhook(request: Request):
                 logger.exception("[LEMON] Failed to generate/save report for order %s", order_id)
 
     return {"received": True}
+
+
+# ---------------------------------------------------------------------------
+# PayPal Checkout endpoints
+# ---------------------------------------------------------------------------
+
+
+class PayPalOrderRequest(BaseModel):
+    idea_text: str
+    idea_hash: str = ""
+    depth: Literal["quick", "deep"] = "quick"
+
+
+class PayPalCaptureRequest(BaseModel):
+    order_id: str
+    idea_hash: str = ""
+    idea_text: str = ""
+    depth: Literal["quick", "deep"] = "deep"
+
+
+@app.post("/api/create-paypal-order")
+async def create_paypal_order(req: PayPalOrderRequest, request: Request):
+    """Create a PayPal checkout order for a paid report.
+
+    Returns: { "order_id": str, "approve_url": str }
+    """
+    if not paypal_utils._get_client_id():
+        raise HTTPException(status_code=503, detail="PayPal is not configured")
+
+    if not req.idea_text or not req.idea_text.strip():
+        raise HTTPException(status_code=422, detail="idea_text cannot be empty")
+
+    # Build return/cancel URLs from the Referer or default to mnemox.ai
+    origin = (request.headers.get("origin") or "https://mnemox.ai").rstrip("/")
+    success_url = f"{origin}/check/?paypal_complete=1"
+    cancel_url = f"{origin}/check/"
+
+    try:
+        result = await paypal_utils.create_order(
+            idea_text=req.idea_text.strip(),
+            idea_hash=req.idea_hash,
+            depth=req.depth,
+            success_url=success_url,
+            cancel_url=cancel_url,
+        )
+    except Exception as exc:
+        logger.exception("PayPal order creation failed")
+        raise HTTPException(status_code=502, detail="Payment service unavailable.") from exc
+
+    return result
+
+
+@app.post("/api/capture-paypal-order")
+async def capture_paypal_order(req: PayPalCaptureRequest):
+    """Capture a PayPal order after user approval, generate report.
+
+    Returns: { "status": "complete", "report_data": {...}, "report_id": str }
+    """
+    if not paypal_utils._get_client_id():
+        raise HTTPException(status_code=503, detail="PayPal is not configured")
+
+    if not req.order_id:
+        raise HTTPException(status_code=422, detail="order_id is required")
+
+    # 1. Capture the payment
+    try:
+        capture_result = await paypal_utils.capture_order(req.order_id)
+    except Exception as exc:
+        logger.exception("PayPal capture failed for order %s", req.order_id)
+        raise HTTPException(status_code=502, detail="Payment capture failed.") from exc
+
+    if capture_result.get("status") != "COMPLETED":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Payment not completed: {capture_result.get('status', 'unknown')}",
+        )
+
+    # 2. Idempotency — check if report already exists for this order
+    existing = score_db.get_report_by_stripe_session(req.order_id)
+    if existing:
+        return {
+            "status": "complete",
+            "report_data": json.loads(existing["report_data"]) if isinstance(existing["report_data"], str) else existing["report_data"],
+            "report_id": existing["report_id"],
+        }
+
+    # 3. Generate report
+    idea_text = req.idea_text.strip()
+    idea_hash_val = req.idea_hash or (score_db.idea_hash(idea_text) if idea_text else "")
+    buyer_email = capture_result.get("payer_email", "")
+
+    if not idea_text:
+        raise HTTPException(status_code=422, detail="idea_text is required to generate report")
+
+    try:
+        gen_result = await _generate_report_on_the_fly(
+            idea_text=idea_text,
+            idea_hash_val=idea_hash_val,
+            language="en",
+            order_id=req.order_id,
+            buyer_email=buyer_email,
+            depth=req.depth,
+            tier="single",
+        )
+    except Exception as exc:
+        logger.exception("Report generation failed for PayPal order %s", req.order_id)
+        raise HTTPException(status_code=500, detail="Report generation failed.") from exc
+
+    # 4. Fetch the saved report to return full data
+    report_row = score_db.get_report(gen_result["report_id"])
+    report_data = {}
+    if report_row:
+        rd = report_row.get("report_data", "{}")
+        report_data = json.loads(rd) if isinstance(rd, str) else rd
+
+    return {
+        "status": "complete",
+        "report_data": report_data,
+        "report_id": gen_result["report_id"],
+    }
 
 
 async def _generate_report_on_the_fly(
