@@ -1,6 +1,6 @@
 ---
 name: idea-reality
-version: 1.0.0
+version: 0.5.0
 description: Pre-build reality check — scan GitHub, HN, npm, PyPI, Product Hunt for existing prior art before you build.
 metadata:
   openclaw:
