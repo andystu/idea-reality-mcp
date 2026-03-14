@@ -173,6 +173,10 @@ class ExtractKeywordsRequest(BaseModel):
     idea_text: str
 
 
+class ExpandIdeaRequest(BaseModel):
+    idea_text: str
+
+
 class SubscribeRequest(BaseModel):
     email: str
     idea_hash: str
@@ -450,6 +454,68 @@ async def extract_keywords_endpoint(req: ExtractKeywordsRequest, request: Reques
         raise HTTPException(status_code=502, detail="LLM extraction failed")
 
     return {"keywords": keywords}
+
+
+_EXPAND_SYSTEM_PROMPT = """You are a product analyst. The user described a software idea in a vague way. Your job is to interpret what they actually mean and expand it into a structured description.
+
+Respond in JSON only:
+{"expanded_description": "1-2 sentence clear description", "core_concept": "main concept in 3-5 words", "differentiator": "what makes this different", "target_user": "who would use this", "category": "software category"}"""
+
+_EXPAND_REQUIRED_KEYS = {"expanded_description", "core_concept", "differentiator", "target_user", "category"}
+
+
+@app.post("/api/expand-idea")
+async def expand_idea_endpoint(req: ExpandIdeaRequest, request: Request):
+    """LLM-powered idea expansion via Claude Haiku 4.5.
+
+    Body: { "idea_text": "..." }
+    Returns: { "expanded_description", "core_concept", "differentiator", "target_user", "category" }
+
+    Rate-limited to 50 requests per IP per day.
+    """
+    if not req.idea_text or not req.idea_text.strip():
+        raise HTTPException(status_code=400, detail="idea_text cannot be empty")
+
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        raise HTTPException(status_code=500, detail="LLM expansion not available")
+
+    client_ip = request.client.host if request.client else "unknown"
+    if not _check_rate_limit(client_ip):
+        raise HTTPException(status_code=429, detail="Daily rate limit exceeded (50/day)")
+
+    try:
+        import anthropic
+
+        client = anthropic.AsyncAnthropic(api_key=os.environ["ANTHROPIC_API_KEY"], timeout=30.0)
+        message = await client.messages.create(
+            model="claude-haiku-4-5",
+            max_tokens=300,
+            system=_EXPAND_SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": req.idea_text.strip()}],
+        )
+
+        raw = message.content[0].text.strip()
+
+        # Strip markdown code fences if present
+        if raw.startswith("```"):
+            lines = raw.split("\n")
+            lines = [ln for ln in lines if not ln.strip().startswith("```")]
+            raw = "\n".join(lines).strip()
+
+        result = json.loads(raw)
+
+        if not isinstance(result, dict) or not _EXPAND_REQUIRED_KEYS.issubset(result):
+            raise HTTPException(status_code=500, detail="LLM returned incomplete response")
+
+        return {k: result[k] for k in _EXPAND_REQUIRED_KEYS}
+
+    except HTTPException:
+        raise
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=500, detail="LLM returned non-JSON response")
+    except Exception:
+        logger.exception("Expand idea LLM call failed")
+        raise HTTPException(status_code=500, detail="LLM expansion failed")
 
 
 @app.post("/api/check")

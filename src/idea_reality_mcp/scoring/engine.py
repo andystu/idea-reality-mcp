@@ -501,6 +501,37 @@ def _filter_relevant_similars(
     return relevant + fallback
 
 
+def filter_by_core_concept(items: list[dict], core_concept: str) -> list[dict]:
+    """Filter items to only those mentioning at least one core concept word.
+
+    Extracts core words from core_concept (split by spaces/hyphens, lowercased,
+    stop words removed). Items kept if their name/description/detail field
+    contains at least one core word (case-insensitive).
+
+    Returns all items unfiltered if core_concept is empty or yields no valid words.
+    """
+    if not core_concept or not core_concept.strip():
+        return items
+
+    # Extract core words: split on spaces and hyphens, lowercase, remove stop words
+    raw_words = re.split(r"[\s\-]+", core_concept.strip().lower())
+    core_words = [w for w in raw_words if w and w not in STOP_WORDS]
+
+    if not core_words:
+        return items
+
+    filtered = []
+    for item in items:
+        text = " ".join(
+            str(item.get(field, ""))
+            for field in ("name", "description", "detail")
+        ).lower()
+        if any(word in text for word in core_words):
+            filtered.append(item)
+
+    return filtered
+
+
 def _duplicate_likelihood(signal: int) -> Literal["low", "medium", "high"]:
     if signal < 30:
         return "low"
@@ -595,6 +626,7 @@ def compute_signal(
     pypi_results: PyPIResults | None = None,
     ph_results: ProductHuntResults | None = None,
     so_results: StackOverflowResults | None = None,
+    expansion: dict | None = None,
 ) -> dict:
     """Compute the full reality check output.
 
@@ -808,6 +840,10 @@ def compute_signal(
 
     # Filter similars for relevance — prevent broad keyword matches
     top_similars = _filter_relevant_similars(top_similars, idea_text, keywords)
+
+    # Filter evidence by core concept if expansion provides one
+    if expansion is not None and expansion.get("core_concept"):
+        evidence = filter_by_core_concept(evidence, expansion["core_concept"])
 
     return {
         "reality_signal": signal,

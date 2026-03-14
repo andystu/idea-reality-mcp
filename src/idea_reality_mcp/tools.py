@@ -13,6 +13,7 @@ from .sources.pypi import search_pypi
 from .sources.producthunt import search_producthunt
 from .sources.stackoverflow import search_stackoverflow
 from .scoring.engine import compute_signal, extract_keywords
+from .scoring.expansion import expand_idea, generate_platform_queries
 
 
 @mcp.tool()
@@ -41,15 +42,26 @@ async def idea_check(
     # for web users; MCP stdio clients get the reliable dictionary path.
     keyword_source = "dictionary"
     keywords = extract_keywords(idea_text)
+    expansion = None
+    platform_queries: dict = {}
+
+    if len(idea_text.split()) < 15:
+        expansion = await expand_idea(idea_text)
+        if expansion is not None:
+            keywords = extract_keywords(expansion["expanded_description"])
+            if expansion["core_concept"] not in keywords:
+                keywords.append(expansion["core_concept"])
+            keyword_source = "expanded"
+            platform_queries = generate_platform_queries(expansion, keywords)
 
     if depth == "deep":
         # Deep mode: query all sources in parallel
-        github_task = search_github_repos(keywords)
-        hn_task = search_hn(keywords)
-        npm_task = search_npm(keywords)
-        pypi_task = search_pypi(keywords)
-        ph_task = search_producthunt(keywords)
-        so_task = search_stackoverflow(keywords)
+        github_task = search_github_repos(platform_queries.get("github", keywords))
+        hn_task = search_hn(platform_queries.get("hackernews", keywords))
+        npm_task = search_npm(platform_queries.get("npm", keywords))
+        pypi_task = search_pypi(platform_queries.get("pypi", keywords))
+        ph_task = search_producthunt(platform_queries.get("producthunt", keywords))
+        so_task = search_stackoverflow(platform_queries.get("stackoverflow", keywords))
 
         github_results, hn_results, npm_results, pypi_results, ph_results, so_results = (
             await asyncio.gather(
@@ -67,12 +79,13 @@ async def idea_check(
             pypi_results=pypi_results,
             ph_results=ph_results,
             so_results=so_results,
+            expansion=expansion,
         )
     else:
         # Quick mode: GitHub + HN in parallel
         github_results, hn_results = await asyncio.gather(
-            search_github_repos(keywords),
-            search_hn(keywords),
+            search_github_repos(platform_queries.get("github", keywords)),
+            search_hn(platform_queries.get("hackernews", keywords)),
         )
 
         result = compute_signal(
@@ -81,6 +94,7 @@ async def idea_check(
             github_results=github_results,
             hn_results=hn_results,
             depth=depth,
+            expansion=expansion,
         )
 
     result["meta"]["keyword_source"] = keyword_source
