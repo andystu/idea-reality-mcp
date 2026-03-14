@@ -17,7 +17,11 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-PAYPAL_API = "https://api-m.paypal.com"
+def _get_api_base() -> str:
+    """Return PayPal API base URL. Uses sandbox if PAYPAL_SANDBOX=1."""
+    if (os.environ.get("PAYPAL_SANDBOX") or "").strip() in ("1", "true", "yes"):
+        return "https://api-m.sandbox.paypal.com"
+    return "https://api-m.paypal.com"
 
 # Module-level token cache: {"token": str, "expires_at": float}
 _token_cache: dict[str, object] = {}
@@ -55,7 +59,7 @@ async def get_access_token() -> str:
 
     async with httpx.AsyncClient(timeout=15.0) as client:
         resp = await client.post(
-            f"{PAYPAL_API}/v1/oauth2/token",
+            f"{_get_api_base()}/v1/oauth2/token",
             auth=(client_id, client_secret),
             data={"grant_type": "client_credentials"},
             headers={"Accept": "application/json"},
@@ -108,7 +112,7 @@ async def create_order(
 
     async with httpx.AsyncClient(timeout=15.0) as client:
         resp = await client.post(
-            f"{PAYPAL_API}/v2/checkout/orders",
+            f"{_get_api_base()}/v2/checkout/orders",
             headers={
                 "Authorization": f"Bearer {token}",
                 "Content-Type": "application/json",
@@ -139,7 +143,7 @@ async def capture_order(order_id: str) -> dict:
 
     async with httpx.AsyncClient(timeout=15.0) as client:
         resp = await client.post(
-            f"{PAYPAL_API}/v2/checkout/orders/{order_id}/capture",
+            f"{_get_api_base()}/v2/checkout/orders/{order_id}/capture",
             headers={
                 "Authorization": f"Bearer {token}",
                 "Content-Type": "application/json",
@@ -178,7 +182,7 @@ async def get_order(order_id: str) -> dict:
 
     async with httpx.AsyncClient(timeout=15.0) as client:
         resp = await client.get(
-            f"{PAYPAL_API}/v2/checkout/orders/{order_id}",
+            f"{_get_api_base()}/v2/checkout/orders/{order_id}",
             headers={
                 "Authorization": f"Bearer {token}",
             },
