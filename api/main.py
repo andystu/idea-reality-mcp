@@ -1791,6 +1791,7 @@ class PayPalCaptureRequest(BaseModel):
     idea_hash: str = ""
     idea_text: str = ""
     depth: Literal["quick", "deep"] = "deep"
+    language: Literal["en", "zh"] = "en"
 
 
 @app.post("/api/create-paypal-order")
@@ -1871,7 +1872,7 @@ async def capture_paypal_order(req: PayPalCaptureRequest):
         gen_result = await _generate_report_on_the_fly(
             idea_text=idea_text,
             idea_hash_val=idea_hash_val,
-            language="en",
+            language=req.language,
             order_id=req.order_id,
             buyer_email=buyer_email,
             depth=req.depth,
