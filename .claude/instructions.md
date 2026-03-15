@@ -7,7 +7,7 @@ Mnemox Idea Reality MCP Server v0.5.0 — pre-build reality check for AI coding 
 
 ## Quick Ref
 - GitHub: mnemox-ai/idea-reality-mcp | PyPI: idea-reality-mcp
-- Tests: `uv run pytest tests/ -v` (247 tests)
+- Tests: `uv run pytest tests/ -v` (275 tests)
 - Entry: `python -m idea_reality_mcp` or `uv run python -m idea_reality_mcp`
 - Tech: Python 3.11+, FastMCP 3.x, httpx (async), uv
 
@@ -20,8 +20,9 @@ src/idea_reality_mcp/
 ├── scoring/
 │   ├── engine.py      # reality_signal formula + 3-stage keyword extraction
 │   ├── synonyms.py    # INTENT_ANCHORS (90+) + SYNONYMS (80+)
-│   └── llm.py         # Haiku 4.5 integration (Render API)
-└── sources/           # github.py, hn.py, npm.py, pypi.py, producthunt.py
+│   ├── llm.py         # Haiku 4.5 integration (Render API)
+│   └── expansion.py   # Idea expansion + per-platform query generation
+└── sources/           # github.py, hn.py, npm.py, pypi.py, producthunt.py, stackoverflow.py
 
 api/
 ├── main.py            # FastAPI (REST + MCP Streamable HTTP)
@@ -32,6 +33,7 @@ api/
 ## API Endpoints (Render: https://idea-reality-mcp.onrender.com)
 - `POST /api/check` — `{idea_text, depth}` → report + idea_hash
 - `POST /api/extract-keywords` — Haiku 4.5 (50/IP/day)
+- `POST /api/expand-idea` — Haiku 4.5 idea expansion (50/IP/day)
 - `GET  /api/history/{idea_hash}` — score history
 - `POST /api/subscribe` — email collection (dual-write: SQLite + stdout)
 - `ANY  /mcp` — MCP Streamable HTTP
@@ -39,7 +41,7 @@ api/
 
 ## Modes
 - **quick**: GitHub + HN (repos 60% + stars 20% + HN 20%)
-- **deep**: 5 sources parallel (repos 25% + stars 10% + HN 15% + npm 20% + PyPI 15% + PH 15%)
+- **deep**: 6 sources parallel (repos 25% + stars 10% + HN 15% + npm 20% + PyPI 15% + PH 15% + SO bonus)
 
 ## Key Design Decisions
 - Protocol, not SaaS — no dashboard, no user accounts
