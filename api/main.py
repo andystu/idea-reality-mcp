@@ -14,6 +14,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import time as _time
 import uuid
 from collections import defaultdict
@@ -691,6 +692,8 @@ async def check(req: CheckRequest, request: Request):
 @app.get("/api/history/{idea_hash}")
 async def get_history(idea_hash: str):
     """Get score history for an idea by its hash."""
+    if not _HEX_RE.match(idea_hash):
+        raise HTTPException(status_code=400, detail="Invalid idea_hash format")
     records = score_db.get_history(idea_hash)
     if not records:
         raise HTTPException(status_code=404, detail="No history found for this idea")
@@ -702,9 +705,14 @@ async def get_history(idea_hash: str):
 # ---------------------------------------------------------------------------
 
 
+_HEX_RE = re.compile(r"^[a-f0-9]+$")
+
+
 @app.get("/api/badge-data/{idea_hash}")
 async def badge_data(idea_hash: str):
     """Return badge-ready summary for an idea."""
+    if not _HEX_RE.match(idea_hash):
+        raise HTTPException(status_code=400, detail="Invalid idea_hash format")
     row = score_db.get_idea_by_hash(idea_hash)
     if not row:
         raise HTTPException(status_code=404, detail="Idea not found")
@@ -735,6 +743,8 @@ class CrowdIntelRequest(BaseModel):
 @app.post("/api/crowd-intel")
 async def crowd_intel(req: CrowdIntelRequest):
     """Return crowd intelligence for an idea."""
+    if not _HEX_RE.match(req.idea_hash):
+        raise HTTPException(status_code=400, detail="Invalid idea_hash format")
     row = score_db.get_idea_by_hash(req.idea_hash)
     if not row:
         raise HTTPException(status_code=404, detail="Idea not found")
