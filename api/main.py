@@ -75,6 +75,14 @@ async def _get_github_stars():
     return _github_stars_cache["value"]
 
 
+_VALID_LANGS = {"en", "zh"}
+
+
+def _sanitize_lang(value: str) -> str:
+    """Whitelist lang to 'en' or 'zh'. Returns 'en' for any other value."""
+    return value if value in _VALID_LANGS else "en"
+
+
 # ---------------------------------------------------------------------------
 # Discord webhook — passive query intelligence (fire-and-forget, no PII)
 # ---------------------------------------------------------------------------
@@ -340,6 +348,7 @@ async def _generate_pivot_hints_llm(
 
     Returns a list of 3 hint strings, or *None* on any failure.
     """
+    lang = _sanitize_lang(lang)
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
         logger.info("[PIVOT] skipped — no ANTHROPIC_API_KEY")
@@ -785,7 +794,7 @@ async def crowd_intel(req: CrowdIntelRequest):
 
 class UnlockRequest(BaseModel):
     idea_text: str
-    lang: str = "en"
+    lang: Literal["en", "zh"] = "en"
 
 
 @app.post("/api/unlock-report")
@@ -1620,7 +1629,7 @@ async def report_json(report_id: str):
 
 
 @app.post("/report/{report_id}/translate")
-async def translate_report(report_id: str, lang: str = "en"):
+async def translate_report(report_id: str, lang: Literal["en", "zh"] = "en"):
     """Re-generate strategic analysis in a different language.
 
     NOTE: Language switching is deprioritized for V1.0. This endpoint is
@@ -1799,7 +1808,7 @@ async def lemon_webhook(request: Request):
         custom_data = event.get("meta", {}).get("custom_data", {})
         idea_text = custom_data.get("idea_text", "")
         idea_hash_val = custom_data.get("idea_hash", "")
-        language = custom_data.get("language", "en")
+        language = _sanitize_lang(custom_data.get("language", "en"))
         depth = custom_data.get("depth", "quick")
         tier = custom_data.get("tier", "single")
         buyer_email = attrs.get("user_email", "")
@@ -2019,6 +2028,7 @@ async def _generate_report_on_the_fly(
     Returns {"payment_status": "paid", "status": "complete", "report_id": ...}.
     Raises on failure.
     """
+    language = _sanitize_lang(language)
     keywords = await _extract_keywords_via_haiku(idea_text)
     keyword_source = "llm"
     if keywords is None:
@@ -2142,7 +2152,7 @@ async def _checkout_status_logic(
                 if not custom:
                     custom = {}
                 lemon_idea_text = custom.get("idea_text", "")
-                language = custom.get("language", "en")
+                language = _sanitize_lang(custom.get("language", "en"))
                 idea_hash_val = custom.get("idea_hash", "")
                 lemon_depth = custom.get("depth", "quick")
                 lemon_tier = custom.get("tier", "single")

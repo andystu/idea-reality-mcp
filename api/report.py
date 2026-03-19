@@ -469,6 +469,9 @@ async def _generate_strategic_analysis(
     angles: list[str] | None = None,
 ) -> str:
     """Call Sonnet for paid report strategic analysis. Falls back to template."""
+    # Defense-in-depth: whitelist language before inserting into LLM prompt
+    if language not in ("en", "zh"):
+        language = "en"
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
         logger.info("[REPORT] skipped LLM — no ANTHROPIC_API_KEY")
