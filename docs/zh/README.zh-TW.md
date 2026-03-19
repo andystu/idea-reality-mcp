@@ -1,4 +1,4 @@
-[English](README.md) | 繁體中文
+[English](../../README.md) | 繁體中文
 
 # idea-reality-mcp
 
@@ -259,6 +259,6 @@ export PRODUCTHUNT_TOKEN=your_...  # 啟用 Product Hunt（deep mode）
 
 ## 授權
 
-MIT — 見 [LICENSE](LICENSE)
+MIT — 見 [LICENSE](../../LICENSE)
 
 由 [Mnemox AI](https://mnemox.ai) 打造 · [dev@mnemox.ai](mailto:dev@mnemox.ai)

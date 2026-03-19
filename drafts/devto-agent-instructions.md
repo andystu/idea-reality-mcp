@@ -115,7 +115,7 @@ Set `GITHUB_TOKEN` for higher rate limits (optional). Set `PRODUCTHUNT_TOKEN` to
 
 - **GitHub**: [mnemox-ai/idea-reality-mcp](https://github.com/mnemox-ai/idea-reality-mcp)
 - **Web demo**: [mnemox.ai/check](https://mnemox.ai/check) -- test any idea without installing anything
-- **Agent instruction templates**: [examples/agent-instructions.md](https://github.com/mnemox-ai/idea-reality-mcp/blob/master/examples/agent-instructions.md)
+- **Agent instruction templates**: [examples/agent-instructions.md](https://github.com/mnemox-ai/idea-reality-mcp/blob/main/examples/agent-instructions.md)
 - **MCP Registry**: `io.github.mnemox-ai/idea-reality-mcp`
 
 Your agent does not need to guess. Make it search.

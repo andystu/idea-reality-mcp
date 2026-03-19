@@ -1,4 +1,4 @@
-[English](CHANGELOG.md) | 繁體中文
+[English](../../CHANGELOG.md) | 繁體中文
 
 # 更新日誌
 
