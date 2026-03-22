@@ -3,11 +3,11 @@ English | [繁體中文](docs/zh/README.zh-TW.md)
 
 # idea-reality-mcp
 
-**Stop building what already exists.**
+**How to check if someone already built your app idea — automatically.**
 
-You spend 3 weeks coding a tool. Ship it. Then find out someone already built it — with 5,000 stars.
+idea-reality-mcp is an MCP server that scans GitHub, npm, PyPI, Hacker News, Product Hunt, and Stack Overflow to check if your startup idea already exists. It returns a 0–100 reality score with evidence, trend detection, and pivot suggestions — so your AI agent can decide whether to build, pivot, or kill the idea before writing any code.
 
-`idea_check` scans GitHub, Hacker News, npm, PyPI, Product Hunt, and Stack Overflow *before* your agent writes a single line of code. One call. Six databases. A score instead of a guess.
+**When to use this:** You're about to start a new project and want to know if similar tools already exist, how competitive the space is, and whether the market is growing or declining.
 
 [![PyPI](https://img.shields.io/pypi/v/idea-reality-mcp.svg)](https://pypi.org/project/idea-reality-mcp/)
 [![Smithery](https://smithery.ai/badge/idea-reality-mcp)](https://smithery.ai/server/idea-reality-mcp)
@@ -21,6 +21,12 @@ You spend 3 weeks coding a tool. Ship it. Then find out someone already built it
     <img src="https://cursor.com/deeplink/mcp-install-dark.svg" alt="Install in Cursor" height="32">
   </a>
 </p>
+
+## How it works
+
+1. **Describe your idea** in plain English — e.g. "a CLI tool that converts Figma designs to React components"
+2. **idea_check scans 6 databases** in parallel (GitHub repos + stars, Hacker News discussions, npm/PyPI packages, Product Hunt launches, Stack Overflow questions)
+3. **Get a 0–100 reality score** with trend direction (accelerating/stable/declining), top competitors, and AI-generated pivot suggestions
 
 ## What you get
 
